@@ -1,7 +1,8 @@
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
-use cgmath::{InnerSpace, Vector3, Zero};
-use std::{cmp, rc::Rc};
+use cgmath::{InnerSpace, Vector3, Zero, Bounded};
+// use core::slice::SlicePattern;
+use std::{cmp, rc::Rc, f32::consts::E, result};
 
 //
 // Lengths of normalized vectors (These are half their maximum values
@@ -82,6 +83,7 @@ pub struct ABrush {
     brush: Option<Box<UModel>>,
 }
 
+#[derive(Clone)]
 pub struct FPlane {
     pub normal: Vector3<f32>,
     pub distance: f32,
@@ -110,10 +112,12 @@ pub enum ESplitType {
     Split = 3,    // Poly was split into two new editor polygons
 }
 
+#[derive(Clone)]
 pub struct FBspSurf {
     material: Option<Rc<UMaterial>>,
-    poly_flags: u32,
+    poly_flags: EPolyFlags,
     base: usize,
+    actor: Option<Rc<ABrush>>,
     normal_index: Option<usize>,
     texture_u_vector_index: Option<usize>,
     texture_v_vector_index: Option<usize>,
@@ -122,6 +126,25 @@ pub struct FBspSurf {
     node_indices: Vec<u32>,
     plane: FPlane,
     light_map_scale: f32,
+}
+
+impl FBspSurf {
+    pub fn new() -> FBspSurf {
+        FBspSurf {
+            material: None,
+            poly_flags: EPolyFlags::None,
+            base: 0,
+            actor: None,
+            normal_index: None,
+            texture_u_vector_index: None,
+            texture_v_vector_index: None,
+            brush_polygon_index: None,
+            brush: Rc::new(ABrush { brush: None }),
+            node_indices: Vec::new(),
+            plane: FPlane::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 0.0)),
+            light_map_scale: 0.0,
+        }
+    }
 }
 
 pub fn line_plane_intersection(point1: &Vector3<f32>, point2: &Vector3<f32>, plane: &FPlane) -> Vector3<f32> {
@@ -175,7 +198,7 @@ pub struct FPoly {
     pub item_name: String,
     // pub vertex_count: usize,
     pub link: Option<usize>, // iBspSurf, or brush fpoly index of first identical polygon, or MAXWORD.
-    pub brush_polygon_index: usize, // Index of editor solid's polygon this originated from.
+    pub brush_polygon_index: Option<usize>, // Index of editor solid's polygon this originated from.
     pub uv: [Vector3<f32>; 3], // UV coordinates corresponding to the first 3 vertices in the list.  Used by texture alignment tools. (X = U, Y = V, Z = N/A)
     pub smoothing_mask: u32,
     pub light_map_scale: f32,
@@ -192,9 +215,9 @@ impl FPoly {
             poly_flags: EPolyFlags::EdCut,
             actor: None,
             material: None,
-            item_name: String::new(),
+            item_name: String::new(),   // TODO: if this is never used just remove it
             link: None,
-            brush_polygon_index: 0,
+            brush_polygon_index: None,
             uv: [Vector3::new(0.0, 0.0, 0.0); 3],
             smoothing_mask: 0,
             light_map_scale: 32.0,
@@ -225,6 +248,7 @@ impl FPoly {
         let mut poly = FPoly::new();
         let _ = poly.vertices.try_extend_from_slice(vertices);
         // TODO: not sure about the winding order here, this normal calculation may need to be reversed
+        poly.base = vertices[0];
         poly.normal = (vertices[1] - vertices[0]).cross(vertices[2] - vertices[0]).normalize();
         poly
     }
@@ -498,11 +522,34 @@ const MAX_NODE_VERTICES: usize = 16;
 const MAX_FINAL_VERTICES: usize = 24;
 const MAX_ZONES: usize = 64;
 
+#[derive(Clone)]
 pub struct FSphere {
     origin: Vector3<f32>,
     radius: f32,
 }
 
+impl FSphere {
+    // Compute a bounding sphere from an array of points.
+    pub fn new_from_points(points: &[Vector3<f32>]) -> FSphere {
+        if points.is_empty() {
+            FSphere { origin: Vector3::zero(), radius: 0.0 }
+        } else {
+            let box_ = FBox::new_from_points(points);
+            let mut sphere = FSphere { origin: (box_.min + box_.max) * 0.5, radius: 0.0 };
+            for point in points {
+                let dist = (point - sphere.origin).magnitude2();
+                if dist > sphere.radius {
+                    sphere.radius = dist;
+                }
+            }
+            // NOTE: The 1.001 is probably to avoid precision issues.
+            sphere.radius = sphere.radius.sqrt() * 1.001;
+            sphere
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct FBspNode {
     pub plane: FPlane,
     pub zone_mask: i64,
@@ -512,15 +559,39 @@ pub struct FBspNode {
     pub front_node_index: Option<usize>,  // Index to the node in back (opposite direction of the normal)
     pub plane_index: Option<usize>,   // Index to the next coplanar poly in the coplanar list
     pub exclusive_sphere_bound: FSphere,
-    pub collision_bound_index: usize,
-    pub render_bound_index: usize,
+    pub collision_bound_index: Option<usize>,
+    pub render_bound_index: Option<usize>,
     pub zone_indices: [u8; 2],
     pub vertex_count: u8,
     pub node_flags: EBspNodeFlags,
     pub leaf_indices: [Option<i32>; 2],
-    pub section_index: i32,
+    pub section_index: Option<usize>,
     pub section_vertex_index: i32,
-    pub light_map_index: i32
+    pub light_map_index: Option<usize>
+}
+
+impl FBspNode {
+    fn new() -> FBspNode {
+        FBspNode {
+            plane: FPlane::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 0.0)),
+            zone_mask: 0,
+            vertex_pool_index: 0,
+            surface_index: 0,
+            back_node_index: None,
+            front_node_index: None,
+            plane_index: None,
+            exclusive_sphere_bound: FSphere { origin: Vector3::new(0.0, 0.0, 0.0), radius: 0.0 },
+            collision_bound_index: None,
+            render_bound_index: None,
+            zone_indices: [0; 2],
+            vertex_count: 0,
+            node_flags: EBspNodeFlags::None,
+            leaf_indices: [None; 2],
+            section_index: None,
+            section_vertex_index: 0,
+            light_map_index: None
+        }
+    }
 }
 
 bitflags! {
@@ -558,6 +629,34 @@ impl FBspNode {
 pub struct FBox {
     min: Vector3<f32>,
     max: Vector3<f32>,
+}
+
+impl FBox {
+    pub fn new_from_points(points: &[Vector3<f32>]) -> FBox {
+        let mut min = Vector3::max_value();
+        let mut max = Vector3::min_value();
+        for point in points {
+            if point.x < min.x {
+                min.x = point.x;
+            }
+            if point.y < min.y {
+                min.y = point.y;
+            }
+            if point.z < min.z {
+                min.z = point.z;
+            }
+            if point.x > max.x {
+                max.x = point.x;
+            }
+            if point.y > max.y {
+                max.y = point.y;
+            }
+            if point.z > max.z {
+                max.z = point.z;
+            }
+        }
+        FBox { min, max }
+    }
 }
 
 pub struct FLeaf {
@@ -599,6 +698,15 @@ pub struct FVert {
     pub side: Option<i32>,      // If shared, index of unique side. Otherwise INDEX_NONE.
 }
 
+impl FVert {
+    pub fn new() -> FVert {
+        FVert {
+            vertex_index: 0,
+            side: None,
+        }
+    }
+}
+
 pub struct UModel {
     polys: Vec<FPoly>,
     nodes: Vec<FBspNode>,
@@ -619,8 +727,67 @@ pub struct UModel {
     zones: ArrayVec<FZoneProperties, MAX_ZONES>
 }
 
+// Find closest vertex to a point at or below a node in the Bsp.  If no vertices
+// are closer than MinRadius, returns -1.
+pub fn find_nearest_vertex(
+    model: &UModel,
+    source_point: Vector3<f32>,
+    dest_point: &mut Vector3<f32>,
+    mut min_radius: f32,
+    mut node_index: Option<usize>,
+    vertex_index: &mut usize
+) -> f32 {
+    let mut result_radius =  -1.0;
+    while node_index.is_some() {
+        let node = &model.nodes[node_index.unwrap()];
+        let back_index = node.back_node_index;
+        let plane_distance = node.plane.plane_dot(source_point);
+
+        if plane_distance >= -min_radius && node.front_node_index.is_some() {
+            // Check front.
+            let temp_radius = find_nearest_vertex(model, source_point, dest_point, min_radius, node.front_node_index, vertex_index);
+            if temp_radius >= 0.0 {
+                result_radius = temp_radius;
+                min_radius = temp_radius;
+            }
+        }
+
+        if plane_distance > -min_radius && plane_distance <= min_radius {
+			// Check this node's poly's vertices.
+            while node_index.is_some() {
+                // Loop through all coplanars.
+                let node = &model.nodes[node_index.unwrap()];
+                let surf = &model.surfs[node.surface_index];
+                let base = &model.points[surf.base];
+                let temp_radius_squared = (source_point - base).magnitude2();
+
+                if temp_radius_squared < (min_radius * min_radius) {
+                    *vertex_index = surf.base;
+                    min_radius = temp_radius_squared.sqrt();
+                    result_radius = min_radius;
+                    *dest_point = *base;
+                }
+
+                // more here...it never ends
+            }
+        }
+    }
+    // unfinished
+    0.0 
+}
+
 impl UModel {
 
+    // Find Bsp node vertex nearest to a point (within a certain radius) and
+    // set the location.  Returns distance, or -1.f if no point was found.
+    pub fn find_vertest_vertex(&self, source_point: Vector3<f32>, dest_point: &mut Vector3<f32>, min_radius: f32, vertex_index: &mut usize) -> f32 {
+        return if self.nodes.is_empty() {
+            -1.0
+        } else {
+            find_nearest_vertex(self, source_point, dest_point, min_radius, 0, vertex_index)
+        }
+    }
+    
     pub fn shrink_model(&mut self) {
         self.vectors.shrink_to_fit();
         self.points.shrink_to_fit();
@@ -676,6 +843,7 @@ pub enum EPolyNodeFilter {
     CospatialFacingOut  = 5, // Poly is coplanar, cospatial, and facing out.
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ENodePlace {
 	Back		= 0, // Node is in back of parent              -> Bsp[iParent].iBack.
 	Front		= 1, // Node is in front of parent             -> Bsp[iParent].iFront.
@@ -714,7 +882,7 @@ pub fn sutract_brush_from_world_func(model: &UModel, node_index: usize, ed_poly:
 
 }
 
-pub fn filter_leaf(filter_func: BspFilterFunc, model: &UModel, node_index: usize, ed_poly: &FPoly, mut coplanar_info: FCoplanarInfo, mut leaf_outside: bool, place: ENodePlace) {
+pub fn filter_leaf(filter_func: BspFilterFunc, model: &UModel, node_index: usize, ed_poly: &mut FPoly, mut coplanar_info: FCoplanarInfo, mut leaf_outside: bool, place: ENodePlace) {
     
     if coplanar_info.original_node_index.is_none() {
         // Processing regular, non-coplanar polygons.
@@ -751,7 +919,7 @@ pub fn filter_leaf(filter_func: BspFilterFunc, model: &UModel, node_index: usize
                 // another call to FilterLeaf with iNode = leaf this falls into in the
                 // back tree and EdPoly = the final EdPoly to insert.
                 coplanar_info.processing_back = true;
-                filter_ed_poly(filter_func, model, back_node_index, ed_poly, coplanar_info, coplanar_info.back_node_outside);
+                filter_ed_poly(filter_func, model, back_node_index, ed_poly, coplanar_info.clone(), coplanar_info.back_node_outside);
             }
         }
     }
@@ -762,7 +930,7 @@ pub fn filter_leaf(filter_func: BspFilterFunc, model: &UModel, node_index: usize
 // handle the tricky case of double-recursion for polys that must be
 // filtered through a node's front, then filtered through the node's back,
 // in order to handle coplanar CSG properly.
-pub fn filter_ed_poly(filter_func: BspFilterFunc, model: &UModel, mut node_index: usize, ed_poly: &FPoly, mut coplanar_info: FCoplanarInfo, mut outside: bool) {
+pub fn filter_ed_poly(filter_func: BspFilterFunc, model: &UModel, mut node_index: usize, ed_poly: &mut FPoly, mut coplanar_info: FCoplanarInfo, mut outside: bool) {
     let mut split_result = 0; // TODO: not sure what this is actually.
     let mut our_front_node_index: Option<usize> = None;
     let mut our_back_node_index: Option<usize> = None;
@@ -772,10 +940,10 @@ pub fn filter_ed_poly(filter_func: BspFilterFunc, model: &UModel, mut node_index
     //FilterLoop:
     if ed_poly.vertices.len() >= FPOLY_VERTEX_THRESHOLD {
         // Split EdPoly in half to prevent vertices from overflowing.
-        let temp = ed_poly.split_in_half();
+        let mut temp = ed_poly.split_in_half();
 
         // Filter other half.
-        filter_ed_poly(filter_func, model, node_index, &temp, coplanar_info, outside);
+        filter_ed_poly(filter_func, model, node_index, &mut temp, coplanar_info.clone(), outside);
     }
 
     // Split em.
@@ -806,7 +974,7 @@ pub fn filter_ed_poly(filter_func: BspFilterFunc, model: &UModel, mut node_index
 
             match node.back_node_index {
                 None => {
-                    filter_leaf(filter_func, model, node_index, ed_poly, coplanar_info, outside, ENodePlace::Back)
+                    filter_leaf(filter_func, model, node_index, ed_poly, coplanar_info.clone(), outside, ENodePlace::Back)
                 }
                 Some(back_node_index) => {
                     node_index = back_node_index
@@ -833,7 +1001,7 @@ pub fn filter_ed_poly(filter_func: BspFilterFunc, model: &UModel, mut node_index
             // See whether Node's iFront or iBack points to the side of the tree on the front
             // of this polygon (will be as expected if this polygon is facing the same
             // way as first coplanar in link, otherwise opposite).
-            let node = model.nodes[node_index];
+            let node = &model.nodes[node_index];
             if node.plane.normal.dot(ed_poly.normal) >= 0.0 {
                 our_front_node_index = node.front_node_index;
                 our_back_node_index = node.back_node_index;
@@ -858,7 +1026,7 @@ pub fn filter_ed_poly(filter_func: BspFilterFunc, model: &UModel, mut node_index
                 coplanar_info.front_leaf_outside = new_front_outside;
 
                 filter_leaf(
-                    filter_func, model, node_index, ed_poly, coplanar_info, coplanar_info.back_node_outside, ENodePlace::Plane
+                    filter_func, model, node_index, ed_poly, coplanar_info.clone(), coplanar_info.back_node_outside, ENodePlace::Plane
                 );
             } else if our_front_node_index.is_none() && our_back_node_index.is_some() {
                 // Back but no front.
@@ -897,20 +1065,20 @@ pub fn filter_ed_poly(filter_func: BspFilterFunc, model: &UModel, mut node_index
             // Front half of split.
             match node.front_node_index {
                 None => {
-                    filter_leaf(filter_func, model, node_index, &temp_front_ed_poly, coplanar_info, new_front_outside, ENodePlace::Front);
+                    filter_leaf(filter_func, model, node_index, &mut temp_front_ed_poly, coplanar_info.clone(), new_front_outside, ENodePlace::Front);
                 }
                 Some(front_node_index) => {
-                    filter_ed_poly(filter_func, model, front_node_index, &temp_front_ed_poly, coplanar_info, new_front_outside)
+                    filter_ed_poly(filter_func, model, front_node_index, &mut temp_front_ed_poly, coplanar_info.clone(), new_front_outside)
                 }
             }
 
             // Back half of split.
             match node.back_node_index {
                 None => {
-                    filter_leaf(filter_func, model, node_index, &temp_back_ed_poly, coplanar_info, new_back_outside, ENodePlace::Back);
+                    filter_leaf(filter_func, model, node_index, &mut temp_back_ed_poly, coplanar_info.clone(), new_back_outside, ENodePlace::Back);
                 }
                 Some(back_node_index) => {
-                    filter_ed_poly(filter_func, model, back_node_index, &temp_back_ed_poly, coplanar_info, new_back_outside);
+                    filter_ed_poly(filter_func, model, back_node_index, &mut temp_back_ed_poly, coplanar_info.clone(), new_back_outside);
                 }
             }
         }
@@ -919,7 +1087,7 @@ pub fn filter_ed_poly(filter_func: BspFilterFunc, model: &UModel, mut node_index
 
 // Regular entry into FilterEdPoly (so higher-level callers don't have to
 // deal with unnecessary info). Filters starting at root.
-pub fn bsp_filter_fpoly(filter_func: BspFilterFunc, model: &UModel, ed_poly: &FPoly) {
+pub fn bsp_filter_fpoly(filter_func: BspFilterFunc, model: &UModel, ed_poly: &mut FPoly) {
     let starting_coplanar_info = FCoplanarInfo::new();
 
     if model.nodes.is_empty() {
@@ -936,29 +1104,27 @@ pub fn bsp_filter_fpoly(filter_func: BspFilterFunc, model: &UModel, ed_poly: &FP
     }
 }
 
-struct BspBuilder {
-    temp_model: UModel,
-}
-
-const INDEX_NONE: i32 = -1; // TODO: remove this eventually
-
 /*---------------------------------------------------------------------------------------
    Bsp point/vector refreshing.
 ---------------------------------------------------------------------------------------*/
 
 pub fn tag_referenced_nodes(model: &mut UModel, node_ref: &mut Vec<Option<usize>>, poly_ref: &mut Vec<Option<usize>>, node_index: usize) {
-    let mut node = model.nodes[node_index];
+    let node = &mut model.nodes[node_index];
 
     node_ref[node_index] = Some(0);
     poly_ref[node.surface_index] = Some(0);
 
-	if let Some(front_node_index) = node.front_node_index {
+    let front_node_index = node.front_node_index;
+    let back_node_index = node.back_node_index;
+    let plane_index = node.plane_index;
+
+	if let Some(front_node_index) = front_node_index {
         tag_referenced_nodes(model, node_ref, poly_ref, front_node_index);
     }
-	if let Some(back_node_index) = node.back_node_index {
+	if let Some(back_node_index) = back_node_index {
         tag_referenced_nodes(model, node_ref, poly_ref, back_node_index);
     }
-    if let Some(plane_index) = node.plane_index {
+    if let Some(plane_index) = plane_index {
         tag_referenced_nodes(model, node_ref, poly_ref, plane_index);
     }
 }
@@ -982,7 +1148,7 @@ pub fn bsp_refresh(model: &mut UModel, no_remap_surfs: bool) {
     let mut n = 0;
     for i in 0..model.surfs.len() {
         if poly_ref[i].is_some() {
-            model.surfs[n] = model.surfs[i];
+            model.surfs[n] = model.surfs[i].clone();
             poly_ref[i] = Some(n);
             n += 1;
         }
@@ -992,7 +1158,7 @@ pub fn bsp_refresh(model: &mut UModel, no_remap_surfs: bool) {
     n = 0;
     for i in 0..model.nodes.len() {
         if node_ref[i].is_some() {
-            model.nodes[n] = model.nodes[i];
+            model.nodes[n] = model.nodes[i].clone();
             node_ref[i] = Some(n);
             n += 1;
         }
@@ -1069,7 +1235,7 @@ pub fn bsp_refresh(model: &mut UModel, no_remap_surfs: bool) {
     }
 
     // Update Bsp nodes.
-    for node in model.nodes {
+    for node in &model.nodes {
         let vertex_index = node.vertex_pool_index;
         for b in 0..node.vertex_count {
             let vert = &mut model.verts[vertex_index + b as usize];
@@ -1079,6 +1245,67 @@ pub fn bsp_refresh(model: &mut UModel, no_remap_surfs: bool) {
 
     // Shrink the objects.
     model.shrink_model();
+
+}
+
+const WORLD_MAX: f32 = 524288.0;        /* Maximum size of the world */
+const HALF_WORLD_MAX: f32 = 262144.0;	/* Half the maximum size of the world */
+const HALF_WORLD_MAX1: f32 = 262143.0;  /* Half the maximum size of the world - 1*/
+
+fn build_zone_masks(model: &mut UModel, unknown1: bool) {
+    // TODO: fill this in
+}
+
+fn bsp_build_bounds(model: &mut UModel) {
+    if model.nodes.is_empty() {
+        return;
+    }
+
+    build_zone_masks(model, false);
+
+    let mut polys: [FPoly; 6];
+    
+	polys[0].vertices[0] = Vector3::new(-HALF_WORLD_MAX, -HALF_WORLD_MAX,HALF_WORLD_MAX);
+	polys[0].vertices[1] = Vector3::new(HALF_WORLD_MAX, -HALF_WORLD_MAX,HALF_WORLD_MAX);
+	polys[0].vertices[2] = Vector3::new(HALF_WORLD_MAX, HALF_WORLD_MAX,HALF_WORLD_MAX);
+	polys[0].vertices[3] = Vector3::new(-HALF_WORLD_MAX, HALF_WORLD_MAX,HALF_WORLD_MAX);
+	polys[0].base = polys[0].vertices[0];
+	polys[0].normal = Vector3::new(0.0,  0.0,  1.0);
+
+	polys[1].vertices[0] = Vector3::new(-HALF_WORLD_MAX, HALF_WORLD_MAX,-HALF_WORLD_MAX);
+	polys[1].vertices[1] = Vector3::new(HALF_WORLD_MAX, HALF_WORLD_MAX,-HALF_WORLD_MAX);
+	polys[1].vertices[2] = Vector3::new(HALF_WORLD_MAX,-HALF_WORLD_MAX,-HALF_WORLD_MAX);
+	polys[1].vertices[3] = Vector3::new(-HALF_WORLD_MAX,-HALF_WORLD_MAX,-HALF_WORLD_MAX);
+	polys[1].base = polys[1].vertices[0];
+	polys[1].normal = Vector3::new(0.0,  0.0, -1.0);
+
+	polys[2].vertices[0] = Vector3::new(-HALF_WORLD_MAX,HALF_WORLD_MAX,-HALF_WORLD_MAX);
+	polys[2].vertices[1] = Vector3::new(-HALF_WORLD_MAX,HALF_WORLD_MAX, HALF_WORLD_MAX);
+	polys[2].vertices[2] = Vector3::new(HALF_WORLD_MAX,HALF_WORLD_MAX, HALF_WORLD_MAX);
+	polys[2].vertices[3] = Vector3::new(HALF_WORLD_MAX,HALF_WORLD_MAX,-HALF_WORLD_MAX);
+	polys[2].base = polys[2].vertices[0];
+	polys[2].normal = Vector3::new(0.0, 1.0, 0.0);
+
+	polys[3].vertices[0] = Vector3::new(HALF_WORLD_MAX,-HALF_WORLD_MAX,-HALF_WORLD_MAX);
+	polys[3].vertices[1] = Vector3::new(HALF_WORLD_MAX,-HALF_WORLD_MAX, HALF_WORLD_MAX);
+	polys[3].vertices[2] = Vector3::new(-HALF_WORLD_MAX,-HALF_WORLD_MAX, HALF_WORLD_MAX);
+	polys[3].vertices[3] = Vector3::new(-HALF_WORLD_MAX,-HALF_WORLD_MAX,-HALF_WORLD_MAX);
+	polys[3].base = polys[3].vertices[0];
+	polys[3].normal = Vector3::new(0.0, -1.0, 0.0);
+
+	polys[4].vertices[0] = Vector3::new(HALF_WORLD_MAX, HALF_WORLD_MAX,-HALF_WORLD_MAX);
+	polys[4].vertices[1] = Vector3::new(HALF_WORLD_MAX, HALF_WORLD_MAX, HALF_WORLD_MAX);
+	polys[4].vertices[2] = Vector3::new(HALF_WORLD_MAX,-HALF_WORLD_MAX, HALF_WORLD_MAX);
+	polys[4].vertices[3] = Vector3::new(HALF_WORLD_MAX,-HALF_WORLD_MAX,-HALF_WORLD_MAX);
+	polys[4].base = polys[4].vertices[0];
+	polys[4].normal = Vector3::new(1.0,  0.0, 0.0);
+
+	polys[5].vertices[0] = Vector3::new(-HALF_WORLD_MAX,-HALF_WORLD_MAX,-HALF_WORLD_MAX);
+	polys[5].vertices[1] = Vector3::new(-HALF_WORLD_MAX,-HALF_WORLD_MAX, HALF_WORLD_MAX);
+	polys[5].vertices[2] = Vector3::new(-HALF_WORLD_MAX, HALF_WORLD_MAX, HALF_WORLD_MAX);
+	polys[5].vertices[3] = Vector3::new(-HALF_WORLD_MAX, HALF_WORLD_MAX,-HALF_WORLD_MAX);
+	polys[5].normal = Vector3::new(-1.0, 0.0, 0.0);
+	polys[5].base = polys[5].vertices[0];
 
 }
 
@@ -1093,8 +1320,8 @@ pub fn find_best_split<'a>(poly_list: &[&'a FPoly], optimization: EBspOptimizati
 
     let inc = match optimization {   // original called "inc" (increment, probably)
         EBspOptimization::Optimal => 1,                                             // Test lots of nodes.
-        EBspOptimization::Good => std::cmp::max(1, poly_list.len() / 20),   // Test 20 nodes.
-        EBspOptimization::Lame => std::cmp::max(1, poly_list.len() / 4),    // Test 4 nodes.
+        EBspOptimization::Good => cmp::max(1, poly_list.len() / 20),   // Test 20 nodes.
+        EBspOptimization::Lame => cmp::max(1, poly_list.len() / 4),    // Test 4 nodes.
     };
 
     // See if there are any semisolid polygons here.
@@ -1189,21 +1416,311 @@ pub fn find_best_split<'a>(poly_list: &[&'a FPoly], optimization: EBspOptimizati
     return best.unwrap();
 }
 
+fn add_thing(vectors: &mut Vec<Vector3<f32>>, v: Vector3<f32>, threshold: f32, check: bool) -> usize {
+    if check {
+        for (i, vector) in vectors.iter().enumerate() {
+            let mut temp = v.x - vector.x;
+            if temp > -threshold && temp < threshold {
+                temp = v.y - vector.y;
+                if temp > -threshold && temp < threshold {
+                    temp = v.z - vector.z;
+                    if temp > -threshold && temp < threshold {
+						// Found nearly-matching vector.
+                        return i;
+                    }
+                }
+            }
+        }
+    }
+    vectors.push(v);
+    vectors.len() - 1
+}
+
+fn bsp_add_point(model: &mut UModel, point: Vector3<f32>, exact: bool) {
+    let threshold = if exact { THRESH_POINTS_ARE_SAME } else { THRESH_POINTS_ARE_NEAR };
+
+	// Try to find a match quickly from the Bsp. This finds all potential matches
+	// except for any dissociated from nodes/surfaces during a rebuild.
+    let mut temp = Vector3::<f32>::new(0.0, 0.0, 0.0);
+    let mut nearest_dist = model.find_nearest_vertex(point, temp, threshold, vertex_index);
+    let fast_rebuild = false;   // TODO: this is some sort of global
+
+    if nearest_dist >= 0.0 && nearest_dist <= threshold {
+        // Found an existing point.
+        return vertex_index;
+    } else {
+        // No match found; add it slowly to find duplicates.
+        return add_thing(&mut model.points, point, threshold, !fast_rebuild);
+    }
+}
+
+
+// Add an editor polygon to the Bsp, and also stick a reference to it
+// in the editor polygon's BspNodes list. If the editor polygon has more sides
+// than the Bsp will allow, split it up into several sub-polygons.
+//
+// Returns: Index to newly-created node of Bsp.  If several nodes were created because
+// of split polys, returns the parent (highest one up in the Bsp).
+fn bsp_add_node(model: &mut UModel, parent_index: usize, node_place: ENodePlace, mut node_flags: EBspNodeFlags, ed_poly: &FPoly) -> usize {
+    if node_place == ENodePlace::Plane {
+		// Make sure coplanars are added at the end of the coplanar list so that 
+		// we don't insert NF_IsNew nodes with non NF_IsNew coplanar children.
+        parent_index = model.nodes[parent_index].plane_index.unwrap();
+    }
+
+    let surf = if ed_poly.link.unwrap_or(-1) == model.surfs.len() {
+        let mut surf = FBspSurf::new();
+        surf.base = bsp_add_point(model, ed_poly.base, true);
+        surf.normal_index = bsp_add_vector(model, ed_poly.normal, true);
+        surf.texture_u_vector_index = bsp_add_vector(model, ed_poly.texture_u, false);
+        surf.texture_v_vector_index = bsp_add_vector(model, ed_poly.texture_v, false);
+        surf.material = ed_poly.material;
+        surf.poly_flags = ed_poly.poly_flags & !EPolyFlags::NoAddToBSP;
+        surf.light_map_scale = ed_poly.light_map_scale;
+        surf.actor = ed_poly.actor;
+        surf.brush_polygon_index = ed_poly.brush_polygon_index;
+        surf.plane = FPlane::new(ed_poly.vertices[0], ed_poly.normal);
+        // TODO: i think this needs to be ADDED to a list of some sort
+        surf
+    } else {
+		//check(EdPoly->iLink != INDEX_NONE);
+		//check(EdPoly->iLink < Model->Surfs.Num());
+        model.surfs[ed_poly.link.unwrap()]
+    };
+
+	// Set NodeFlags.
+    if surf.poly_flags.contains(EPolyFlags::NotSolid) {
+        node_flags |= EBspNodeFlags::NotCsg;
+    }
+    if surf.poly_flags.intersects(EPolyFlags::Invisible | EPolyFlags::Portal) {
+        node_flags |= EBspNodeFlags::NotVisBlocking;
+    }
+    if surf.poly_flags.contains(EPolyFlags::Masked) {
+        node_flags |= EBspNodeFlags::ShootThrough;
+    }
+
+    if ed_poly.vertices.len() > MAX_NODE_VERTICES {
+		// Split up into two coplanar sub-polygons (one with MAX_NODE_VERTICES vertices and
+		// one with all the remaining vertices) and recursively add them.
+
+		// Copy first bunch of verts.
+        let ed_poly1 = Box::new(FPoly::new());
+        *ed_poly1 = *ed_poly;
+        ed_poly1.vertices.truncate(MAX_NODE_VERTICES);
+
+        let ed_poly2 = Box::new(FPoly::new());
+        *ed_poly2 = *ed_poly;
+		// Copy first vertex then the remaining vertices.   // TODO: INCORRECT
+        ed_poly2.vertices.drain(0..MAX_NODE_VERTICES);
+
+        let node_index = bsp_add_node(model, parent_index, node_place, node_flags, &ed_poly1);  // Add this poly first.
+        bsp_add_node(model, parent_index, node_place, node_flags, &ed_poly2); // Then add other (may be bigger).
+
+        return node_index;
+    } else {
+        // Add node.
+        if node_place != ENodePlace::Root {
+            model.nodes.modify_item(parent_index);  // ??
+        }
+
+        let node_index = model.nodes.len();
+        let node = FBspNode::new();
+        model.nodes.push(node); // TODO: not right, this needs to be Rc'd I think
+
+		// Tell transaction tracking system that parent is about to be modified.
+        let parent = if node_place != ENodePlace::Root {
+            Some(&mut model.nodes[parent_index])
+        } else {
+            None
+        };
+
+        node.surface_index = ed_poly.link.unwrap();
+        node.node_flags = node_flags;
+        node.render_bound_index = None;
+        node.collision_bound_index = None;
+        node.zone_mask = if parent.is_some() { parent.unwrap().zone_mask } else { 0xFFFFFFFFFFFFFFFF };
+        node.plane = FPlane::new(ed_poly.vertices[0], ed_poly.normal);
+        node.vertex_pool_index = model.verts.len();
+        // TODO: add zeroed verts to the model list
+        model.verts.resize_with(model.verts.len() + ed_poly.vertices.len(), || FVert::new());
+        node.front_node_index = None;
+        node.back_node_index = None;
+        node.plane_index = None;
+
+        match node_place {
+            ENodePlace::Root => {
+                node.leaf_indices[0] = None;
+                node.leaf_indices[1] = None;
+                node.zone_indices[0] = 0;
+                node.zone_indices[0] = 0;
+            }
+            ENodePlace::Front | ENodePlace::Back => {
+                let zone_front = if node_place == ENodePlace::Front { 1usize } else { 0usize };
+                node.leaf_indices[0] = parent.leaf_indices[zone_front];
+                node.leaf_indices[1] = parent.leaf_indices[zone_front];
+                node.zone_indices[0] = parent.zone_indices[zone_front];
+                node.zone_indices[0] = parent.zone_indices[zone_front];
+            }
+            _ => {
+                let is_flipped = (node.plane.normal.dot(parent.plane.normal) < 0.0) as usize;
+                node.leaf_indices[0] = parent.leaf_indices[is_flipped];
+                node.leaf_indices[1] = parent.leaf_indices[1 - is_flipped];
+                node.zone_indices[0] = parent.zone_indices[is_flipped];
+                node.zone_indices[0] = parent.zone_indices[1 - is_flipped];
+            }
+        }
+
+		// Link parent to this node.
+        match node_place {
+            ENodePlace::Front => {
+                parent.front_node_index = Some(node_index);
+            }
+            ENodePlace::Back => {
+                parent.back_node_index = Some(node_index);
+            }
+            ENodePlace::Plane => {
+                parent.plane_index = Some(node_index);
+            }
+            _ => {}
+        }
+
+		// Add all points to point table, merging nearly-overlapping polygon points
+		// with other points in the poly to prevent criscrossing vertices from
+		// being generated.
+
+		// Must maintain Node->NumVertices on the fly so that bspAddPoint is always
+		// called with the Bsp in a clean state.
+
+        let n = ed_poly.vertices.len();
+        let points: ArrayVec<Vector3<f32>, MAX_NODE_VERTICES>;
+        let vert_pool = &model.verts[node.vertex_pool_index..];
+        for i in 0..n {
+            let vertex_index = bsp_add_point(model, ed_poly.vertices[i], false);
+
+            if node.vertex_count == 0 || vert_pool[node.vertex_count as usize - 1].vertex_index != vertex_index {
+                points[node.vertex_count as usize] = ed_poly.vertices[i];
+                vert_pool[node.vertex_count as usize].side = None;
+                vert_pool[node.vertex_count as usize].vertex_index = vertex_index;
+                node.vertex_count += 1;
+            }
+        }
+
+        if node.vertex_count >= 2 && vert_pool[0].vertex_index == vert_pool[node.vertex_count as usize - 1].vertex_index {
+            node.vertex_count -= 1;
+        }
+
+        if node.vertex_count < 3 {
+            //g_errors += 1;
+            println!("bspAddNBode: Infinitesimal polygon {} ({}", node.vertex_count, n);
+            node.vertex_count = 0;
+        }
+
+        node.section_index = None;
+        node.light_map_index = None;
+
+		// Calculate a bounding sphere for this node.
+        node.exclusive_sphere_bound = FSphere::new_from_points(&points);
+
+        return node_index;
+    }
+}
+
+
+// Pick a splitter poly then split a pool of polygons into front and back polygons and
+// recurse.
+//
+// iParent = Parent Bsp node, or INDEX_NONE if this is the root node.
+// IsFront = 1 if this is the front node of iParent, 0 of back (undefined if iParent==INDEX_NONE)
 pub fn split_poly_list(
     model: &mut UModel, 
     parent_node_index: Option<usize>, 
     node_place: ENodePlace, 
     poly_count: usize, 
-    poly_list: Vec<&FPoly>, 
+    poly_list: &Vec<&FPoly>, 
     optimization: EBspOptimization, 
     balance: usize, 
     portal_bias: f32, 
     rebuild_simple_polys: bool) {
+
     let num_polys_to_alloc = poly_count + 8 + poly_count / 4;
     let front_list: Vec<&FPoly> = Vec::with_capacity(num_polys_to_alloc);
     let back_list: Vec<&FPoly> = Vec::with_capacity(num_polys_to_alloc);
 
-    let split_poly = find_best_split(poly_list.as_slice(), optimization, balance, portal_bias);
+    let split_poly: &mut FPoly = find_best_split(poly_list.as_slice(), optimization, balance, portal_bias);
+
+    // Add the splitter poly to the Bsp with either a new BspSurf or an existing one.
+    if rebuild_simple_polys {
+        split_poly.link = Some(model.surfs.len());
+    }
+
+    let our_node = bsp_add_node(model, parent_node_index, node_place, 0, split_poly);
+    let plane_node = our_node;
+
+	// Now divide all polygons in the pool into (A) polygons that are
+	// in front of Poly, and (B) polygons that are in back of Poly.
+	// Coplanar polys are inserted immediately, before recursing.
+
+	// If any polygons are split by Poly, we ignrore the original poly,
+	// split it into two polys, and add two new polys to the pool.
+
+    let mut front_ed_poly = Box::new(FPoly::new());
+    let mut back_ed_poly = Box::new(FPoly::new());
+
+    for i in 0..poly_count {
+        let ed_poly = poly_list[i];
+
+        if ed_poly == split_poly {  // TODO: this is testing pointer equality, not value equality
+            continue;
+        }
+
+        match ed_poly.split_with_plane(
+            split_poly.vertices[0], 
+            split_poly.normal, 
+            Some(&mut front_ed_poly), 
+            Some(&mut back_ed_poly), 
+            false) 
+            {
+                ESplitType::Coplanar => {
+                    if rebuild_simple_polys {
+                        ed_poly.link = if model.surfs.is_empty() { None } else { Some(model.surfs.len() - 1) }
+                    }
+                    plane_node = bsp_add_node(model, plane_node, ENodePlace::Plane, 0, ed_poly);
+                },
+                ESplitType::Front => {
+                    front_list.push(poly_list[i]);
+                },
+                ESplitType::Back => {
+                    back_list.push(poly_list[i]);
+                },
+                ESplitType::Split => {
+                    // REALIZATION: All the polys need to be heap allocated.
+                    // Create front & back nodes.
+                    front_list.push(&front_ed_poly);
+                    back_list.push(&back_ed_poly);
+
+				    // If newly-split polygons have too many vertices, break them up in half.
+                    if front_ed_poly.vertices.len() >= FPOLY_VERTEX_THRESHOLD {
+                        let mut temp = Box::new(front_ed_poly.split_in_half());
+                        front_list.push(&temp);
+                    }
+
+                    if back_ed_poly.vertices.len() >= FPOLY_VERTEX_THRESHOLD {
+                        let mut temp = Box::new(back_ed_poly.split_in_half());
+                        back_list.push(&temp);
+                    }
+
+                    front_ed_poly = Box::new(FPoly::new());
+                    back_ed_poly = Box::new(FPoly::new());
+                }
+            }
+    }
+
+    if !front_list.is_empty() {
+        split_poly_list(model, our_node, ENodePlace::Front, front_list.len(), &front_list, optimization, balance, portal_bias, rebuild_simple_polys);
+    }
+    if !back_list.is_empty() {
+        split_poly_list(model, our_node, ENodePlace::Back, back_list.len(), &back_list, optimization, balance, portal_bias, rebuild_simple_polys);
+    }
 }
 
 
@@ -1242,7 +1759,8 @@ pub fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: us
         }
 
         // Now split the entire Bsp by splitting the list of all polygons.
-        split_poly_list(model, None, ENodePlace::Root, model.polys.len(), poly_list, optimization, balance, portal_bias, rebuild_simple_polys);
+        let poly_count = model.polys.len();
+        split_poly_list(model, None, ENodePlace::Root, poly_count, &poly_list,  optimization,  balance,  portal_bias,  rebuild_simple_polys);
 
         if !rebuild_simple_polys {
             // Remove unreferenced things.
@@ -1259,9 +1777,15 @@ pub fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: us
 
 }
 
+
+struct BspBuilder {
+    temp_model: UModel,
+    g_errors: usize
+}
+
 impl BspBuilder {
 
-    pub fn bsp_brush_csg(&mut self, actor: Rc<ABrush>, model: &mut UModel, poly_flags: EPolyFlags, csg_operation: ECsgOper, build_bounds: i32, merge_polygons: bool) {
+    pub fn bsp_brush_csg(&mut self, actor: Rc<ABrush>, model: &mut UModel, poly_flags: EPolyFlags, csg_operation: ECsgOper, build_bounds: bool, merge_polygons: bool) -> usize {
         let mut poly_flags_mask = EPolyFlags::None;
         let mut num_polys_from_brush = 0;
         let mut i = 0;
@@ -1292,17 +1816,22 @@ impl BspBuilder {
         // Transform original brush poly into same coordinate system as world
         // so Bsp filtering operations make sense.
         for i in 0..brush.polys.len() {
-            let mut poly = &brush.polys[i];
+            let poly = &brush.polys[i];
 
             if poly.material.is_none() {
-                poly.material = current_material;   // TODO: where is this coming from?
+                // ======================================================================
+                // ======================================================================
+                // ======================================================================
+                // ======================================================================
+                // ======================================================================
+                //poly.material = current_material;   // TODO: where is this coming from?
             }
 
-            let dest_ed_poly = poly.clone();
+            let mut dest_ed_poly = poly.clone();
 
             // Set its backwards brush link.
-            dest_ed_poly.actor = Some(actor);
-            dest_ed_poly.brush_polygon_index = i;
+            dest_ed_poly.actor = Some(actor.clone());
+            dest_ed_poly.brush_polygon_index = Some(i);
 
             // Update its flags.
             dest_ed_poly.poly_flags = (dest_ed_poly.poly_flags | poly_flags) & !poly_flags_mask;
@@ -1322,19 +1851,19 @@ impl BspBuilder {
         }
 
         for i in 0..brush.polys.len() {
-            let mut ed_poly = self.temp_model.polys[i];
+            let mut ed_poly = self.temp_model.polys[i].clone();
 
          	// Mark the polygon as non-cut so that it won't be harmed unless it must
          	// be split, and set iLink so that BspAddNode will know to add its information
          	// if a node is added based on this poly.
             ed_poly.poly_flags &= !EPolyFlags::EdCut;
+
             if let Some(ed_poly_link) = ed_poly.link {
                 let surf_count = model.surfs.len();  // TODO: maybe just convert the values to usize
                 if ed_poly_link == i {
                     self.temp_model.polys[i].link = Some(surf_count);
                     ed_poly.link = Some(surf_count);
                 } else {
-                    // TODO: unwrap is a little dicey
                     ed_poly.link = self.temp_model.polys[ed_poly_link].link;
                 }
 
@@ -1343,7 +1872,7 @@ impl BspBuilder {
                     ECsgOper::Subtract => sutract_brush_from_world_func
                 };
                 
-                bsp_filter_fpoly(bsp_filter_function, model, &ed_poly);
+                bsp_filter_fpoly(bsp_filter_function, model, &mut ed_poly);
             }
         }
 
@@ -1351,17 +1880,36 @@ impl BspBuilder {
             // Quickly build a Bsp for the brush, tending to minimize splits rather than balance
             // the tree.  We only need the cutting planes, though the entire Bsp struct (polys and
             // all) is built.
-            bsp_build(self.temp_model, EBspOptimization::Lame, 0, 70, true, false);
+            bsp_build(&mut self.temp_model, EBspOptimization::Lame, 0, 0.7, true, 0);
 
-            gmodel = brush;
+            // ======================================================================
+            // ======================================================================
+            // ======================================================================
+            // ======================================================================
+            // ======================================================================
+            //gmodel = brush;
 
-            self.temp_model.build_bound();  // TODO: this is called twice for some reason in the original code.
+            // ======================================================================
+            // ======================================================================
+            // ======================================================================
+            // ======================================================================
+            // ======================================================================
+            //self.temp_model.build_bound();  // TODO: this is called twice for some reason in the original code.
 
-            filter_world_through_brush(model, &self.temp_model, csg_operation, 0, self.temp_model.bounding_shere);
+            // ======================================================================
+            // ======================================================================
+            // ======================================================================
+            // ======================================================================
+            //filter_world_through_brush(model, &self.temp_model, csg_operation, 0, self.temp_model.bounding_shere);
         }
 
+        // ======================================================================
+        // ======================================================================
+        // ======================================================================
+        // ======================================================================
+        // ======================================================================
 		// Clean up nodes, reset node flags.
-        bsp_cleanup(model);
+        //bsp_cleanup(model);
 
 		// Rebuild bounding volumes.
         if build_bounds {
@@ -1371,8 +1919,7 @@ impl BspBuilder {
 	    // Release TempModel.
         self.temp_model.empty_model(true, true);
 
-        return 1 + g_errors;
-
+        return 1 + self.g_errors;
     }
 }
 
