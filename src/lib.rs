@@ -982,6 +982,7 @@ pub fn sutract_brush_from_world_func(filter_context: &mut FilterContext, model: 
     }
 }
 
+// Handle a piece of a polygon that was filtered to a leaf.
 pub fn filter_leaf(filter_func: BspFilterFunc, model: &UModel, node_index: usize, ed_poly: &mut FPoly, mut coplanar_info: FCoplanarInfo, mut leaf_outside: bool, place: ENodePlace) {
     
     if coplanar_info.original_node_index.is_none() {
