@@ -34,19 +34,19 @@ pub enum EBspOptimization {
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct EPolyFlags: u32 {
-        const None          = 0;
+        const None          = 0;    
 
         const Invisible		= 0x00000001;	// Poly is invisible.
         const Masked		= 0x00000002;	// Poly should be drawn masked.
         const Translucent	= 0x00000004;	// Poly is transparent.
         const NotSolid		= 0x00000008;	// Poly is not solid, doesn't block.
         const Environment   = 0x00000010;	// Poly should be drawn environment mapped.
-        const SemiSolid	= 0x00000020;	// Poly is semi-solid = collision solid, Csg nonsolid.
+        const SemiSolid	    = 0x00000020;	// Poly is semi-solid = collision solid, Csg nonsolid.
         const Modulated 	= 0x00000040;	// Modulation transparency.
         const FakeBackdrop	= 0x00000080;	// Poly looks exactly like backdrop.
-        const TwoSided     = 0x00000100;	// Poly is visible from both sides.
+        const TwoSided      = 0x00000100;	// Poly is visible from both sides.
         const NoSmooth		= 0x00000800;	// Don't smooth textures.
-        const AlphaTexture = 0x00001000;	// Honor texture alpha (reuse BigWavy and SpecialPoly flags)
+        const AlphaTexture  = 0x00001000;	// Honor texture alpha (reuse BigWavy and SpecialPoly flags)
         const Flat			= 0x00004000;	// Flat surface.
         const NoMerge		= 0x00010000;	// Don't merge poly's nodes before lighting when rendering.
         const NoZTest		= 0x00020000;	// Don't test Z buffer
@@ -55,7 +55,7 @@ bitflags! {
         const Wireframe		= 0x00200000;	// Render as wireframe
         const Unlit			= 0x00400000;	// Unlit.
         const Portal		= 0x04000000;	// Portal between iZones.
-        const AntiPortal   = 0x08000000;	// Antiportal
+        const AntiPortal    = 0x08000000;	// Antiportal
         const Mirrored      = 0x20000000;   // Mirrored BSP surface.
 
         // Editor flags.
@@ -67,12 +67,12 @@ bitflags! {
         const EdCut       	= 0x80000000;	// FPoly has been split by SplitPolyWithPlane.
 
         // Combinations of flags.
-        //const NoOcclude		= EPolyFlags::Masked | EPolyFlags::Translucent | EPolyFlags::Invisible | EPolyFlags::Modulated | EPolyFlags::AlphaTexture;
-        //const NoEdit			= EPolyFlags.Memorized | EPolyFlags.Selected | EPolyFlags.EdProcessed | EPolyFlags.NoMerge | EPolyFlags.EdCut,
-        //const NoImport		= EPolyFlags.NoEdit | EPolyFlags.NoMerge | EPolyFlags.Memorized | EPolyFlags.Selected | EPolyFlags.EdProcessed | EPolyFlags.EdCut,
-        //const AddLast			= EPolyFlags.Semisolid | EPolyFlags.NotSolid,
-        //const NoAddToBSP		= EPolyFlags.EdCut | EPolyFlags.EdProcessed | EPolyFlags.Selected | EPolyFlags.Memorized,
-        //const NoShadows		= EPolyFlags.Unlit | EPolyFlags.Invisible | EPolyFlags.Environment | EPolyFlags.FakeBackdrop
+        // const NoOcclude		= EPolyFlags::Masked | EPolyFlags::Translucent | EPolyFlags::Invisible | EPolyFlags::Modulated | EPolyFlags::AlphaTexture,
+        // const NoEdit		= EPolyFlags.Memorized | EPolyFlags.Selected | EPolyFlags.EdProcessed | EPolyFlags.NoMerge | EPolyFlags.EdCut,
+        // const NoImport		= EPolyFlags.NoEdit | EPolyFlags.NoMerge | EPolyFlags.Memorized | EPolyFlags.Selected | EPolyFlags.EdProcessed | EPolyFlags.EdCut,
+        // const AddLast		= EPolyFlags.Semisolid | EPolyFlags.NotSolid,
+        const NoAddToBSP	=  0x80000000 | 0x40000000 | 0x02000000 | 0x01000000; /*EPolyFlags.EdCut | EPolyFlags.EdProcessed | EPolyFlags.Selected | EPolyFlags.Memorized*/
+        // const NoShadows		= EPolyFlags.Unlit | EPolyFlags.Invisible | EPolyFlags.Environment | EPolyFlags.FakeBackdrop,
     }
 }
 
@@ -772,7 +772,8 @@ pub struct UModel {
     root_outside: bool,
     linked: bool,
     shared_side_count: i32,
-    zones: ArrayVec<FZoneProperties, MAX_ZONES>
+    zones: ArrayVec<FZoneProperties, MAX_ZONES>,
+    bounding_sphere: FSphere,
 }
 
 impl UModel {
@@ -1567,14 +1568,14 @@ fn bsp_add_vector(model: &mut UModel, vector: Vector3<f32>, normal: bool) -> usi
 //
 // Returns: Index to newly-created node of Bsp.  If several nodes were created because
 // of split polys, returns the parent (highest one up in the Bsp).
-fn bsp_add_node(filter_context: &mut FilterContext, model: &mut UModel, parent_index: usize, node_place: ENodePlace, mut node_flags: EBspNodeFlags, ed_poly: &FPoly) -> usize {
+fn bsp_add_node(filter_context: &mut FilterContext, model: &mut UModel, mut parent_index: usize, node_place: ENodePlace, mut node_flags: EBspNodeFlags, ed_poly: &FPoly) -> usize {
     if node_place == ENodePlace::Plane {
 		// Make sure coplanars are added at the end of the coplanar list so that 
 		// we don't insert NF_IsNew nodes with non NF_IsNew coplanar children.
         parent_index = model.nodes[parent_index].plane_index.unwrap();
     }
 
-    let surf = if ed_poly.link.unwrap_or(-1) == model.surfs.len() {
+    let surf = if ed_poly.link.is_some() && ed_poly.link.unwrap() == model.surfs.len() {
         FBspSurf {
             base: bsp_add_point(model, ed_poly.base, true),
             normal_index: Some(bsp_add_vector(model, ed_poly.normal, true)),
@@ -1586,13 +1587,13 @@ fn bsp_add_node(filter_context: &mut FilterContext, model: &mut UModel, parent_i
             actor: ed_poly.actor,
             brush_polygon_index: ed_poly.brush_polygon_index,
             plane: FPlane::new(ed_poly.vertices[0], ed_poly.normal),
-            brush: ed_poly.actor,
+            brush: ed_poly.actor.unwrap().clone(),
             node_indices: vec![None; 2],    // ??
         }
     } else {
 		//check(EdPoly->iLink != INDEX_NONE);
 		//check(EdPoly->iLink < Model->Surfs.Num());
-        model.surfs[ed_poly.link.unwrap()]
+        model.surfs[ed_poly.link.unwrap()].clone()
     };
 
 	// Set NodeFlags.
@@ -1611,11 +1612,11 @@ fn bsp_add_node(filter_context: &mut FilterContext, model: &mut UModel, parent_i
 		// one with all the remaining vertices) and recursively add them.
 
 		// Copy first bunch of verts.
-        let ed_poly1 = Box::new(FPoly::new());
+        let mut ed_poly1 = Box::new(FPoly::new());
         *ed_poly1 = *ed_poly;
         ed_poly1.vertices.truncate(MAX_NODE_VERTICES);
 
-        let ed_poly2 = Box::new(FPoly::new());
+        let mut ed_poly2 = Box::new(FPoly::new());
         *ed_poly2 = *ed_poly;
 		// Copy first vertex then the remaining vertices.   // TODO: INCORRECT
         ed_poly2.vertices.drain(0..MAX_NODE_VERTICES);
@@ -1631,7 +1632,7 @@ fn bsp_add_node(filter_context: &mut FilterContext, model: &mut UModel, parent_i
         }
 
         let node_index = model.nodes.len();
-        let node = FBspNode::new();
+        let mut node = FBspNode::new();
         model.nodes.push(node); // TODO: not right, this needs to be Rc'd I think
 
 		// Tell transaction tracking system that parent is about to be modified.
@@ -1699,8 +1700,8 @@ fn bsp_add_node(filter_context: &mut FilterContext, model: &mut UModel, parent_i
 		// called with the Bsp in a clean state.
 
         let n = ed_poly.vertices.len();
-        let points: ArrayVec<Vector3<f32>, MAX_NODE_VERTICES>;
-        let vert_pool = &model.verts[node.vertex_pool_index..];
+        let mut points: ArrayVec<Vector3<f32>, MAX_NODE_VERTICES>;
+        let mut vert_pool = &model.verts[node.vertex_pool_index..];
         for i in 0..n {
             let vertex_index = bsp_add_point(model, ed_poly.vertices[i], false);
 
@@ -1739,6 +1740,7 @@ fn bsp_add_node(filter_context: &mut FilterContext, model: &mut UModel, parent_i
 // iParent = Parent Bsp node, or INDEX_NONE if this is the root node.
 // IsFront = 1 if this is the front node of iParent, 0 of back (undefined if iParent==INDEX_NONE)
 pub fn split_poly_list(
+    filter_context: &mut FilterContext,
     model: &mut UModel, 
     parent_node_index: Option<usize>,   // TODO: why is this an option?
     node_place: ENodePlace, 
@@ -1750,8 +1752,8 @@ pub fn split_poly_list(
     rebuild_simple_polys: bool) {
 
     let num_polys_to_alloc = poly_count + 8 + poly_count / 4;
-    let front_list: Vec<&FPoly> = Vec::with_capacity(num_polys_to_alloc);
-    let back_list: Vec<&FPoly> = Vec::with_capacity(num_polys_to_alloc);
+    let mut front_list: Vec<&FPoly> = Vec::with_capacity(num_polys_to_alloc);
+    let mut back_list: Vec<&FPoly> = Vec::with_capacity(num_polys_to_alloc);
 
     let split_poly: &FPoly = find_best_split(poly_list.as_slice(), optimization, balance, portal_bias);
 
@@ -1760,8 +1762,8 @@ pub fn split_poly_list(
         split_poly.link = Some(model.surfs.len());
     }
 
-    let our_node = bsp_add_node(filter_context, model, parent_node_index, node_place, EBspNodeFlags::None, split_poly);
-    let plane_node = our_node;
+    let our_node = bsp_add_node(filter_context, model, parent_node_index.unwrap(), node_place, EBspNodeFlags::None, split_poly);
+    let mut plane_node = our_node;
 
 	// Now divide all polygons in the pool into (A) polygons that are
 	// in front of Poly, and (B) polygons that are in back of Poly.
@@ -1791,7 +1793,7 @@ pub fn split_poly_list(
                     if rebuild_simple_polys {
                         ed_poly.link = if model.surfs.is_empty() { None } else { Some(model.surfs.len() - 1) }
                     }
-                    plane_node = bsp_add_node(model, plane_node, ENodePlace::Plane, 0, ed_poly);
+                    plane_node = bsp_add_node(filter_context, model, plane_node, ENodePlace::Plane, EBspNodeFlags::None, ed_poly);
                 },
                 ESplitType::Front => {
                     front_list.push(poly_list[i]);
@@ -1823,10 +1825,10 @@ pub fn split_poly_list(
     }
 
     if !front_list.is_empty() {
-        split_poly_list(model, our_node, ENodePlace::Front, front_list.len(), &front_list, optimization, balance, portal_bias, rebuild_simple_polys);
+        split_poly_list(filter_context, model, Some(our_node), ENodePlace::Front, front_list.len(), &front_list, optimization, balance, portal_bias, rebuild_simple_polys);
     }
     if !back_list.is_empty() {
-        split_poly_list(model, our_node, ENodePlace::Back, back_list.len(), &back_list, optimization, balance, portal_bias, rebuild_simple_polys);
+        split_poly_list(filter_context, model, Some(our_node), ENodePlace::Back, back_list.len(), &back_list, optimization, balance, portal_bias, rebuild_simple_polys);
     }
 }
 
@@ -1854,6 +1856,15 @@ pub fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: us
         model.empty_model(false, false);
     }
 
+    let mut filter_context = FilterContext {
+        errors: 0,
+        discarded: 0,
+        node_index,
+        last_coplanar: 0,
+        node_count: 0,
+        model
+    };
+
     if !model.polys.is_empty() {
         // Allocate polygon pool.
         let mut poly_list: Vec<&FPoly> = Vec::with_capacity(model.polys.len());
@@ -1867,7 +1878,7 @@ pub fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: us
 
         // Now split the entire Bsp by splitting the list of all polygons.
         let poly_count = model.polys.len();
-        split_poly_list(model, None, ENodePlace::Root, poly_count, &poly_list,  optimization,  balance,  portal_bias,  rebuild_simple_polys);
+        split_poly_list(&mut filter_context, model, None, ENodePlace::Root, poly_count, &poly_list,  optimization,  balance,  portal_bias,  rebuild_simple_polys);
 
         if !rebuild_simple_polys {
             // Remove unreferenced things.
@@ -1881,9 +1892,7 @@ pub fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: us
     // model.clear_render_data <- irrelevant
 
     println!("bspBuild built {} convex polys into {} nodes", original_polys, model.nodes.len());
-
 }
-
 
 struct BspBuilder {
     temp_model: UModel,
@@ -1909,6 +1918,7 @@ pub fn bsp_node_to_fpoly(model: &UModel, node_index: usize, ed_poly: &mut FPoly)
 
     let node = &model.nodes[node_index];
     let poly = &model.surfs[node.surface_index];
+    let mut master_ed_poly = FPoly::new();
 
     let vert_pool = &model.verts[node.vertex_pool_index..];
 
@@ -1920,7 +1930,7 @@ pub fn bsp_node_to_fpoly(model: &UModel, node_index: usize, ed_poly: &mut FPoly)
     ed_poly.actor = poly.actor;
     ed_poly.brush_polygon_index = poly.brush_polygon_index;
 
-    if poly_find_master(model, node.surface_index, master_ed_poly) {
+    if poly_find_master(model, node.surface_index, &mut master_ed_poly) {
         ed_poly.item_name = master_ed_poly.item_name;
     } else {
         ed_poly.item_name = "None".to_string()    // TODO: this is jank
@@ -2442,13 +2452,13 @@ impl BspBuilder {
         // TODO: dicey
         let mut brush = &actor.brush.as_ref().unwrap();
     
-        let filter_context: FilterContext = FilterContext {
+        let mut filter_context: FilterContext = FilterContext {
             errors: 0,
             discarded: 0,
             node_index: 0,
             last_coplanar: 0,
             node_count: 0,
-            model: &mut model,
+            model: model,
         };
     
         if csg_operation != ECsgOper::Add {
@@ -2557,7 +2567,7 @@ impl BspBuilder {
                 node_index: 0,
                 last_coplanar: 0,
                 node_count: 0,
-                model: &mut model,
+                model: model,
             };
             filter_world_through_brush(
                 &mut filter_context, 
@@ -2565,7 +2575,7 @@ impl BspBuilder {
                 &mut self.temp_model, 
                 csg_operation, 
                 Some(0),
-                self.temp_model.bounding_shere);
+                Some(&self.temp_model.bounding_sphere));
         }
 
 		// Clean up nodes, reset node flags.
@@ -2579,7 +2589,7 @@ impl BspBuilder {
 	    // Release TempModel.
         self.temp_model.empty_model(true, true);
 
-        return 1 + self.g_errors;
+        return 1 + filter_context.errors;
     }
 }
 
