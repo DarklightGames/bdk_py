@@ -1,251 +1,499 @@
-use bdk_bsp_python::{FPoly, FPlane, ESplitType, line_plane_intersection};
-use cgmath::{Vector3, InnerSpace};
+use arrayvec::ArrayVec;
+use bdk_rs::{self, fpoly};
 
-fn make_triangle_poly() -> FPoly {
-    let vertices = [
-        Vector3 { x: 0.0, y: 0.0, z: 0.0, },
-        Vector3 { x: 0.0, y: 0.0, z: 1.0, },
-        Vector3 { x: 0.0, y: 1.0, z: 1.0, },
-    ];
-    let mut polygon = FPoly::new();
-    polygon.vertices.clone_from_slice(vertices.as_slice());
-    polygon.normal = Vector3 { x: 1.0, y: 0.0, z: 0.0, };
-    polygon
-}
+use cgmath::{InnerSpace, Vector3};
+use bdk_rs::fpoly::{ESplitType, FPoly, RemoveColinearsResult};
+use bdk_rs::math::FVector;
+use bdk_rs::fpoly::EPolyFlags;
 
-fn make_square_poly() -> FPoly {
-    let vertices = [
-        Vector3 { x: 0.0, y: 0.0, z: 0.0, },
-        Vector3 { x: 0.0, y: 0.0, z: 1.0, },
-        Vector3 { x: 0.0, y: 1.0, z: 1.0, },
-        Vector3 { x: 0.0, y: 1.0, z: 0.0, },
-    ];
-    FPoly::new_from_vertices(vertices.as_slice())
+#[test]
+fn fpoly_reverse_test() {
+    let mut fpoly = FPoly::new();
+    fpoly.normal = Vector3::unit_x();
+    fpoly.vertices.push(Vector3 { x: 0.0, y: 1.0, z: 2.0});
+    fpoly.vertices.push(Vector3 { x: 3.0, y: 4.0, z: 5.0});
+    fpoly.vertices.push(Vector3 { x: 6.0, y: 7.0, z: 8.0});
+
+    fpoly.reverse();
+
+    assert_eq!(fpoly.normal, Vector3 { x: -1.0, y: 0.0, z: 0.0 });
+    assert_eq!(fpoly.vertices.len(), 3);
+    assert_eq!(fpoly.vertices[0], Vector3 { x: 6.0, y: 7.0, z: 8.0});
+    assert_eq!(fpoly.vertices[1], Vector3 { x: 3.0, y: 4.0, z: 5.0});
+    assert_eq!(fpoly.vertices[2], Vector3 { x: 0.0, y: 1.0, z: 2.0});
 }
 
 #[test]
-fn reverse_test() {
-    let vertices = [
-        Vector3 { x: 0.0, y: 0.0, z: 0.0, },
-        Vector3 { x: 0.0, y: 0.0, z: 1.0, },
-        Vector3 { x: 0.0, y: 1.0, z: 1.0, },
-    ];
-    let mut polygon = FPoly::new_from_vertices(vertices.as_slice());
-    assert_eq!(Vector3 { x: -1.0, y: 0.0, z: 0.0, }, polygon.normal);
+fn fpoly_fix_no_collapse_test() {
+    let mut fpoly = FPoly::new();
 
-    polygon.reverse();
+    fpoly.vertices.push(Vector3 { x: 0.0, y: 1.0, z: 2.0});
+    fpoly.vertices.push(Vector3 { x: 3.0, y: 4.0, z: 5.0});
+    fpoly.vertices.push(Vector3 { x: 6.0, y: 7.0, z: 8.0});
+    fpoly.vertices.push(Vector3 { x: 6.0, y: 7.0, z: 8.0}); // Duplicate.
+    fpoly.vertices.push(Vector3 { x: 6.0, y: 7.0, z: 8.0}); // Duplicate.
+    fpoly.vertices.push(Vector3 { x: 9.0, y: 10.0, z: 11.0});
+    fpoly.vertices.push(Vector3 { x: 0.0, y: 1.0, z: 2.0}); // Duplicate.
 
-    assert_eq!(Vector3 { x: 1.0, y: 0.0, z: 0.0, }, polygon.normal);
-    assert_eq!(Vector3 { x: 0.0, y: 1.0, z: 1.0, }, polygon.vertices[0]);
-    assert_eq!(Vector3 { x: 0.0, y: 0.0, z: 1.0, }, polygon.vertices[1]);
-    assert_eq!(Vector3 { x: 0.0, y: 0.0, z: 0.0, }, polygon.vertices[2]);
+    let return_value = fpoly.fix();
+
+    assert_eq!(return_value, 4);
+    assert_eq!(fpoly.vertices.len(), 4);
+    assert_eq!(fpoly.vertices[0], Vector3 { x: 3.0, y: 4.0, z: 5.0});
+    assert_eq!(fpoly.vertices[1], Vector3 { x: 6.0, y: 7.0, z: 8.0});
+    assert_eq!(fpoly.vertices[2], Vector3 { x: 9.0, y: 10.0, z: 11.0});
+    assert_eq!(fpoly.vertices[3], Vector3 { x: 0.0, y: 1.0, z: 2.0});
 }
 
 #[test]
-fn fix_degenerate_triangle() {
-    let vertices = [
-        Vector3 { x: 0.0, y: 0.0, z: 0.0, },
-        Vector3 { x: 0.0, y: 0.0, z: 1.0, },
-        Vector3 { x: 0.0, y: 0.0, z: 1.0, },    // duplicate point
-    ];
-    let mut polygon = FPoly::new_from_vertices(vertices.as_slice());
+fn fpoly_fix_collapse_test() {
+    let mut fpoly = FPoly::from_vertices(&[
+        FVector { x: 0.0, y: 1.0, z: 2.0 },
+        FVector { x: 3.0, y: 4.0, z: 5.0 },
+        FVector { x: 3.0, y: 4.0, z: 5.0 },
+    ]);
 
-    let new_vertex_count = polygon.fix();
+    let return_value = fpoly.fix();
+
+    assert_eq!(return_value, 0);
+    assert_eq!(fpoly.vertices.len(), 0);
+}
+
+#[test]
+fn fpoly_area_test() {
+    let fpoly = FPoly::from_vertices(&[
+        FVector { x: 0.0, y: 0.0, z: 0.0 },
+        FVector { x: 1.0, y: 0.0, z: 0.0 },
+        FVector { x: 1.0, y: 1.0, z: 0.0 },
+    ]);
+
+    let area = fpoly.area();
+
+    assert_eq!(area, 0.5);
+}
+
+// A quad that is facing z-up, with it's center at the origin.
+fn get_z_up_quad_fpoly() -> FPoly {
+    FPoly::from_vertices(&[
+        FVector { x: -1.0, y: -1.0, z: 0.0 },
+        FVector { x: 1.0, y: -1.0, z: 0.0 },
+        FVector { x: 1.0, y: 1.0, z: 0.0 },
+        FVector { x: -1.0, y: 1.0, z: 0.0 },
+    ])
+}
+
+#[test]
+fn fpoly_split_with_plane_coplanar_test() {
+    let fpoly = get_z_up_quad_fpoly();
+
+    let split_type = fpoly.split_with_plane(
+        FVector::new(0.0, 0.0, 0.0),
+        Vector3::unit_z(),
+        false);
+
+    assert_eq!(split_type, ESplitType::Coplanar);
+}
+
+#[test]
+fn fpoly_split_with_plane_back_test() {
+    let fpoly = get_z_up_quad_fpoly();
+
+    let split_type = fpoly.split_with_plane(
+        FVector::new(0.0, 0.0, 1.0),
+        Vector3::unit_z(),
+        false
+    );
+
+    assert_eq!(split_type, ESplitType::Back);
+}
+
+#[test]
+fn fpoly_split_with_plane_front_test() {
+    let fpoly = get_z_up_quad_fpoly();
+
+    let split_type = fpoly.split_with_plane(
+        FVector::new(0.0, 0.0, -1.0),
+        Vector3::unit_z(),
+        false
+    );
+
+    assert_eq!(split_type, ESplitType::Front);
+}
+
+#[test]
+fn fpoly_split_with_plane_split_test() {
+    // Arrange
+    let fpoly = get_z_up_quad_fpoly();
+    let plane_base = FVector::new(0.0, 0.0, 0.0);
+    let plane_normal = Vector3::unit_x();
+
+    // Act
+    let split_type = fpoly.split_with_plane(plane_base, plane_normal, false);
+
+    // Assert
+    let mut front_poly = FPoly::from_vertices(&[
+        FVector::new(0.0, -1.0, 0.0),
+        FVector::new(1.0, -1.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.0, 1.0, 0.0)
+    ]);
+    front_poly.poly_flags.set(EPolyFlags::EdCut, true);
+    let mut back_poly = FPoly::from_vertices(&[
+        FVector::new(-1.0, -1.0, 0.0),
+        FVector::new( 0.0, -1.0, 0.0),
+        FVector::new( 0.0, 1.0, 0.0),
+        FVector::new(-1.0, 1.0, 0.0)
+    ]);
+    back_poly.poly_flags.set(EPolyFlags::EdCut, true);
+    assert_eq!(split_type, ESplitType::Split(front_poly, back_poly))
+}
+
+#[test]
+fn fpoly_split_with_plane_quad_to_tris() {
+    // A z-up quad.
+    let fpoly = get_z_up_quad_fpoly();
+    // A plane that is diagonally facing out from the origin towards one of the corner points.
+    let plane_base = FVector::new(0.0, 0.0, 0.0);
+    let plane_normal = FVector::new(1.0, 1.0, 0.0).normalize();
+
+    let split_type = fpoly.split_with_plane(plane_base, plane_normal, false);
+
+    let mut front_poly = FPoly::from_vertices(&[
+        FVector::new(1.0, -1.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(-1.0, 1.0, 0.0)
+    ]);
+    front_poly.poly_flags.set(EPolyFlags::EdCut, true);
+
+    let mut back_poly = FPoly::from_vertices(&[
+        FVector::new(-1.0, 1.0, 0.0),
+        FVector::new(-1.0, -1.0, 0.0),
+        FVector::new(1.0, -1.0, 0.0)
+    ]);
+    back_poly.poly_flags.set(EPolyFlags::EdCut, true);
+
+    assert_eq!(split_type, ESplitType::Split(front_poly, back_poly))
+}
+
+#[test]
+fn fpoly_split_with_plane_fast_coplanar_test() {
+    let fpoly = get_z_up_quad_fpoly();
+
+    let split_type = fpoly.split_with_plane_fast(
+        &FVector::new(0.0, 0.0, 0.0),
+        &Vector3::unit_z());
+
+    assert_eq!(split_type, ESplitType::Coplanar);
+}
+
+#[test]
+fn fpoly_split_with_plane_fast_back_test() {
+    let fpoly = get_z_up_quad_fpoly();
+
+    let split_type = fpoly.split_with_plane_fast(
+        &FVector::new(0.0, 0.0, 1.0),
+        &Vector3::unit_z()
+    );
+
+    assert_eq!(split_type, ESplitType::Back);
+}
+
+#[test]
+fn fpoly_split_with_plane_fast_front_test() {
+    let fpoly = get_z_up_quad_fpoly();
+
+    let split_type = fpoly.split_with_plane_fast(
+        &FVector::new(0.0, 0.0, -1.0),
+        &Vector3::unit_z()
+    );
+
+    assert_eq!(split_type, ESplitType::Front);
+}
+
+#[test]
+fn fpoly_split_with_plane_fast_split_test() {
+    // Arrange
+    let fpoly = get_z_up_quad_fpoly();
+    let plane_base = FVector::new(0.0, 0.0, 0.0);
+    let plane_normal = Vector3::unit_x();
+
+    // Act
+    let split_type = fpoly.split_with_plane_fast(&plane_base, &plane_normal);
+
+    // Assert
+    let front_poly = FPoly::from_vertices(&[
+        FVector::new(0.0, -1.0, 0.0),
+        FVector::new(1.0, -1.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.0, 1.0, 0.0)
+    ]);
+    let back_poly = FPoly::from_vertices(&[
+        FVector::new(-1.0, -1.0, 0.0),
+        FVector::new( 0.0, -1.0, 0.0),
+        FVector::new( 0.0, 1.0, 0.0),
+        FVector::new(-1.0, 1.0, 0.0)
+    ]);
+    assert_eq!(split_type, ESplitType::Split(front_poly, back_poly))
+}
+
+#[test]
+fn fpoly_split_with_plane_fast_quad_to_tris() {
+    // A z-up quad.
+    let fpoly = get_z_up_quad_fpoly();
+    // A plane that is diagonally facing out from the origin towards one of the corner points.
+    let plane_base = FVector::new(0.0, 0.0, 0.0);
+    let plane_normal = FVector::new(1.0, 1.0, 0.0).normalize();
+    let split_type = fpoly.split_with_plane_fast(&plane_base, &plane_normal);
+
+    // split_with_plane_fast does not remove duplicate vertices.
+    let front_poly = FPoly::from_vertices(&[
+        FVector::new(-1.0, 1.0, 0.0),
+        FVector::new(1.0, -1.0, 0.0),
+        FVector::new(1.0, -1.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(-1.0, 1.0, 0.0)
+    ]);
+
+    let back_poly = FPoly::from_vertices(&[
+        FVector::new(-1.0, 1.0, 0.0),
+        FVector::new(-1.0, -1.0, 0.0),
+        FVector::new(1.0, -1.0, 0.0)
+    ]);
+
+    assert_eq!(split_type, ESplitType::Split(front_poly, back_poly))
+}
+
+#[test]
+fn fpoly_split_in_half_triangle_test() {
+    let mut fpoly = FPoly::from_vertices(&[
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(0.0, 1.0, 0.0),
+    ]);
+
+    let other_half = fpoly.split_in_half();
+
+    // Cannot split a triangle in half, so no new polygon is created.
+    assert_eq!(other_half, None);
+
+    // Ensuyre the original polygon is unchanged.
+    assert_eq!(fpoly.vertices.len(), 3);
+}
+
+#[test]
+fn fpoly_split_in_half_quad_test() {
+    let mut fpoly = FPoly::from_vertices(&[
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.0, 1.0, 0.0),
+    ]);
+
+    let other_half = fpoly.split_in_half();
+
+    assert_eq!(fpoly.vertices.len(), 3);
+    assert_eq!(fpoly.vertices.as_ref(), vec![
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+    ]);
+    assert_eq!(other_half.is_some(), true);
+    assert_eq!(other_half.as_ref().unwrap().vertices.len(), 3);
+    assert_eq!(other_half.as_ref().unwrap().vertices.as_ref(), vec![
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.0, 1.0, 0.0),
+        FVector::new(0.0, 0.0, 0.0),
+    ]);
+    let other_half = other_half.unwrap();
+    assert_eq!(fpoly.poly_flags.contains(EPolyFlags::EdCut), true);
+    assert_eq!(other_half.poly_flags.contains(EPolyFlags::EdCut), true);
+}
+
+#[test]
+fn fpoly_calc_normal_triangle_test() {
+    let mut fpoly = FPoly::from_vertices(&[
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+    ]);
+
+    let normal = fpoly.calc_normal();
+
+    assert_eq!(normal.is_ok(), true);
+    assert_eq!(normal, Ok(Vector3::unit_z()));
+}
+
+#[test]
+fn fpoly_calc_normal_quad_test() {
+    let mut fpoly = get_z_up_quad_fpoly();
+
+    let normal = fpoly.calc_normal();
+
+    assert_eq!(normal.is_ok(), true);
+    assert_eq!(normal, Ok(Vector3::unit_z()));
+}
+
+#[test]
+fn fpoly_calc_normal_degenerate_test() {
+    let mut fpoly = FPoly::from_vertices(&[
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(0.0, 0.0, 0.0),
+    ]);
+
+    let normal = fpoly.calc_normal();
+
+    assert_eq!(normal.is_err(), true);
+}
+
+#[test]
+fn fpoly_remove_colinears_convex_test() {
+    let mut fpoly = get_z_up_quad_fpoly();
+
+    let result = fpoly.remove_colinears();
+
+    assert_eq!(result, RemoveColinearsResult::Convex);
+    assert_eq!(fpoly.vertices.len(), 4);
+}
+
+#[test]
+fn fpoly_remove_colinears_from_quad_test() {
+    let mut fpoly = FPoly::from_vertices(&[
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+    ]);
+
+    let result = fpoly.remove_colinears();
+
+    // Quad should have been reduced to a triangle.
+    assert_eq!(result, RemoveColinearsResult::Convex);
+    assert_eq!(fpoly.vertices.len(), 3);
+}
+
+#[test]
+fn fpoly_remove_colinears_collapse_test() {
+    let mut fpoly = FPoly::from_vertices(&[
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0 + 1.0e-10, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+    ]);
+
+    let result = fpoly.remove_colinears();
+
+    // Degenerate polygon should be collapsed.
+    assert_eq!(result, RemoveColinearsResult::Collapsed);
+    assert_eq!(fpoly.vertices.len(), 0);
+}
+
+#[test]
+fn fpoly_remove_colinears_concave_test() {
+    let mut fpoly = FPoly::from_vertices(&[
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(0.0, 1.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+    ]);
     
-    assert_eq!(0, new_vertex_count);
-    assert_eq!(0, polygon.vertices.len());
+    // Explicitly set the normal to z-up, otherwise remove colinears will not work
+    // since the normal is (0, 0, 0).
+    fpoly.normal = Vector3::unit_z();
+
+    let result = fpoly.remove_colinears();
+
+    assert_eq!(result, RemoveColinearsResult::Concave);
+    // Concave polygon should not be modified.
+    assert_eq!(fpoly.vertices.len(), 4);
 }
 
 #[test]
-fn fix_square_with_one_duplicate_point() {
-    let vertices = [
-        Vector3 { x: 0.0, y: 0.0, z: 0.0, },
-        Vector3 { x: 0.0, y: 0.0, z: 1.0, },
-        Vector3 { x: 0.0, y: 1.0, z: 1.0, },
-        Vector3 { x: 0.0, y: 1.0, z: 1.0, },    // duplicate point
-        Vector3 { x: 0.0, y: 1.0, z: 0.0, },
-    ];
-    let mut polygon = FPoly::new_from_vertices(vertices.as_slice());
-
-    let new_vertex_count = polygon.fix();
-    
-    assert_eq!(4, new_vertex_count);
-    assert_eq!(4, polygon.vertices.len(), "Vertex count should be 4, but is {}", polygon.vertices.len());
-    assert_eq!(Vector3 { x: 0.0, y: 0.0, z: 0.0, }, polygon.vertices[0]);
-    assert_eq!(Vector3 { x: 0.0, y: 0.0, z: 1.0, }, polygon.vertices[1]);
-    assert_eq!(Vector3 { x: 0.0, y: 1.0, z: 1.0, }, polygon.vertices[2]);
-    assert_eq!(Vector3 { x: 0.0, y: 1.0, z: 0.0, }, polygon.vertices[3]);
+fn fpoly_on_poly_point_coincident_test() {
+    let fpoly = FPoly::from_vertices(&[
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+    ]);
+    let point = FVector::new(0.0, 0.0, 0.0);
+    assert_eq!(fpoly.on_poly(&point), true);
 }
 
 #[test]
-fn split_with_plane_test_back() {
-    // Split doesn't do anything because the polygon is entirely in behind the plane.
-    let mut polygon = make_square_poly();
-    let plane_base = Vector3 { x: 0.0, y: 0.0, z: 1.0, };
-    let plane_normal = Vector3 { x: 0.0, y: 0.0, z: 1.0, };
-
-    let split_type = polygon.split_with_plane(plane_base, plane_normal, None, None, false);
-
-    assert_eq!(ESplitType::BACK, split_type);
+fn fpoly_on_poly_point_in_middle_test() {
+    let fpoly = FPoly::from_vertices(&[
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.0, 1.0, 0.0),
+    ]);
+    let point = FVector::new(0.5, 0.5, 1.0);
+    assert_eq!(fpoly.on_poly(&point), true);
 }
 
 #[test]
-fn split_with_plane_test_front() {
-    // Split doesn't do anything because the polygon is entirely in front of the plane.
-    let mut polygon = make_square_poly();
-    let plane_base = Vector3 { x: 0.0, y: 0.0, z: 0.0, };
-    let plane_normal = Vector3 { x: 0.0, y: 0.0, z: 1.0, };
-    
-    let split_type = polygon.split_with_plane(plane_base, plane_normal, None, None, false);
-
-    assert_eq!(ESplitType::FRONT, split_type);
+fn fpoly_on_poly_point_outside_test() {
+    let fpoly = FPoly::from_vertices(&[
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.0, 1.0, 0.0),
+    ]);
+    let point = FVector::new(2.0, 2.0, 1.0);
+    assert_eq!(fpoly.on_poly(&point), false);
 }
 
 #[test]
-fn split_square_into_triangles_with_plane() {
-    let mut polygon = make_square_poly();
-    let plane_base = Vector3 { x: 0.0, y: 0.0, z: 0.0, };
-    let plane_normal = Vector3 { x: 0.0, y: -1.0, z: 1.0, }.normalize();
+fn fpoly_insert_vertex_middle_test() {
+    let mut fpoly = FPoly::from_vertices(&[
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.0, 1.0, 0.0),
+    ]);
+    let new_vertex = FVector::new(0.5, 0.5, 0.0);
+    let insert_index = 2;
+    fpoly.insert_vertex(insert_index, &new_vertex);
 
-    let mut front_poly = FPoly::new();
-    let mut back_poly = FPoly::new();
-    let split_type = polygon.split_with_plane(plane_base, plane_normal, Some(&mut front_poly), Some(&mut back_poly), false);
-
-    assert!(split_type == ESplitType::SPLIT);
-    assert!(front_poly.vertices.len() == 3);
-    assert!(back_poly.vertices.len() == 3);
+    assert_eq!(fpoly.vertices.len(), 5);
+    assert_eq!(fpoly.vertices[insert_index], new_vertex);
 }
 
 #[test]
-fn split_with_plane_test_split() {
-    let mut polygon = make_square_poly();
-    let plane_base = Vector3 { x: 0.0, y: 0.0, z: 0.5, };
-    let plane_normal = Vector3 { x: 0.0, y: 0.0, z: 1.0, };
-    let mut front_poly = FPoly::new();
-    let mut back_poly = FPoly::new();
+fn fpoly_insert_vertex_end_test() {
+    let mut fpoly = FPoly::from_vertices(&[
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.0, 1.0, 0.0),
+    ]);
+    let new_vertex = FVector::new(0.5, 0.5, 0.0);
+    let insert_index = 4;
+    fpoly.insert_vertex(insert_index, &new_vertex);
 
-    let split_type = polygon.split_with_plane(plane_base, plane_normal, Some(&mut front_poly), Some(&mut back_poly), false);
-
-    assert_eq!(ESplitType::SPLIT, split_type);
-    assert_eq!(4, front_poly.vertices.len());
-    assert_eq!(4, back_poly.vertices.len());
-    assert_eq!(front_poly.normal, back_poly.normal);
-    assert_eq!(Vector3 { x: 0.0, y: 0.0, z: 0.5 }, front_poly.vertices[0]);
-    assert_eq!(Vector3 { x: 0.0, y: 0.0, z: 1.0 }, front_poly.vertices[1]);
-    assert_eq!(Vector3 { x: 0.0, y: 1.0, z: 1.0 }, front_poly.vertices[2]);
-    assert_eq!(Vector3 { x: 0.0, y: 1.0, z: 0.5 }, front_poly.vertices[3]);
-    assert_eq!(Vector3 { x: 0.0, y: 0.0, z: 0.0 }, back_poly.vertices[0]);
-    assert_eq!(Vector3 { x: 0.0, y: 0.0, z: 0.5 }, back_poly.vertices[1]);
-    assert_eq!(Vector3 { x: 0.0, y: 1.0, z: 0.5 }, back_poly.vertices[2]);
-    assert_eq!(Vector3 { x: 0.0, y: 1.0, z: 0.0 }, back_poly.vertices[3]);
+    assert_eq!(fpoly.vertices.len(), 5);
+    assert_eq!(fpoly.vertices[insert_index], new_vertex);
 }
 
 #[test]
-fn split_with_plane_test_coplanar() {
-    // Split doesn't do anything because the polygon is entirely in front of the plane.
-    let mut polygon = make_square_poly();
-    let plane_base = Vector3 { x: 0.0, y: 0.0, z: 0.0, };
-    let plane_normal = Vector3 { x: 1.0, y: 0.0, z: 0.0, };
-    let split_type = polygon.split_with_plane(plane_base, plane_normal, None, None, false);
-    assert_eq!(ESplitType::COPLANAR, split_type);
+fn fpoly_split_quad_test() {
+    let mut fpoly = FPoly::from_vertices(&[
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.0, 1.0, 0.0),
+    ]);
+    let plane_base = FVector::new(0.5, 0.5, 0.0);
+    let plane_normal = Vector3::unit_x();
+    let result = fpoly.split(&plane_normal, &plane_base, false);
+
+    assert_eq!(result, 4);
+    assert_eq!(fpoly.vertices.len(), result);
+    let fpoly_vertices = fpoly.vertices.to_vec();
+    assert_eq!(fpoly_vertices, vec![
+        FVector::new(0.5, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.5, 1.0, 0.0),
+    ]);
 }
-
-#[test]
-fn split_with_plane_fast_test_coplanar() {
-    // Split doesn't do anything because the polygon is entirely in front of the plane.
-    let polygon = make_square_poly();
-    let plane = FPlane {
-        normal: Vector3 { x: 1.0, y: 0.0, z: 0.0, },
-        distance: 0.0,
-    };
-
-    let split_type = polygon.split_with_plane_fast(plane, None, None);
-
-    assert_eq!(ESplitType::COPLANAR, split_type);
-}
-
-#[test]
-fn split_with_plane_fast_test_back() {
-    // Split doesn't do anything because the polygon is entirely in front of the plane.
-    let polygon = make_square_poly();
-    let plane = FPlane {
-        normal: Vector3 { x: 0.0, y: 0.0, z: 1.0, },
-        distance: 1.0,
-    };
-
-    let split_type = polygon.split_with_plane_fast(plane, None, None);
-
-    assert_eq!(ESplitType::BACK, split_type);
-}
-
-#[test]
-fn split_with_plane_fast_test_front() {
-    // Split doesn't do anything because the polygon is entirely in front of the plane.
-    let polygon = make_square_poly();
-    let plane = FPlane {
-        normal: Vector3 { x: 0.0, y: 0.0, z: 1.0, },
-        distance: 0.0,
-    };
-    
-    let split_type = polygon.split_with_plane_fast(plane, None, None);
-
-    assert_eq!(ESplitType::FRONT, split_type);
-}
-
-#[test]
-fn split_with_plane_fast_test_split() {
-    let polygon = make_square_poly();
-    let plane = FPlane {
-        normal: Vector3 { x: 0.0, y: 0.0, z: 1.0, },
-        distance: 0.5,
-    };
-    let mut front_poly = FPoly::new();
-    let mut back_poly = FPoly::new();
-
-    let split_type = polygon.split_with_plane_fast(plane, Some(&mut front_poly), Some(&mut back_poly));
-
-    assert_eq!(ESplitType::SPLIT, split_type);
-    assert_eq!(4, front_poly.vertices.len());
-    assert_eq!(4, back_poly.vertices.len());
-    assert_eq!(front_poly.normal, back_poly.normal);
-    assert_eq!(Vector3 { x: 0.0, y: 0.0, z: 0.5 }, front_poly.vertices[0]);
-    assert_eq!(Vector3 { x: 0.0, y: 0.0, z: 1.0 }, front_poly.vertices[1]);
-    assert_eq!(Vector3 { x: 0.0, y: 1.0, z: 1.0 }, front_poly.vertices[2]);
-    assert_eq!(Vector3 { x: 0.0, y: 1.0, z: 0.5 }, front_poly.vertices[3]);
-    assert_eq!(Vector3 { x: 0.0, y: 0.0, z: 0.0 }, back_poly.vertices[0]);
-    assert_eq!(Vector3 { x: 0.0, y: 0.0, z: 0.5 }, back_poly.vertices[1]);
-    assert_eq!(Vector3 { x: 0.0, y: 1.0, z: 0.5 }, back_poly.vertices[2]);
-    assert_eq!(Vector3 { x: 0.0, y: 1.0, z: 0.0 }, back_poly.vertices[3]);
-}
-
-#[test]
-fn line_plane_intersection_test() {
-    let point1 = Vector3 { x: 0.0, y: 0.0, z: -1.0, };
-    let point2 = Vector3 { x: 0.0, y: 0.0, z: 1.0, };
-    let plane = FPlane {
-        normal: Vector3 { x: 0.0, y: 0.0, z: 1.0, },
-        distance: 0.5,
-    };
-
-    let intersection = line_plane_intersection(&point1, &point2, &plane);
-
-    assert_eq!(Vector3 { x: 0.0, y: 0.0, z: 0.5 }, intersection);
-}
-
-#[test]
-fn split_in_half_test() {
-    let mut polygon = make_square_poly();
-
-    let other_polygon = polygon.split_in_half(); // split_in_half modifies the original `polygon` and returns a new one
-
-    assert_eq!(3, polygon.vertices.len());
-    assert_eq!(3, other_polygon.vertices.len());
-}
-
-// #[test]
-// fn split_in_half_triangle_test() {
-//     let mut polygon = make_test_triangle();
-//     let other_polygon = polygon.split_in_half();
-//     assert_eq!(3, polygon.vertex_count);
-//     assert_eq!(3, other_polygon.vertex_count);
-// }
