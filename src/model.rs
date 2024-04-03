@@ -1,4 +1,4 @@
-use bitflags::{bitflags, Flags};
+use bitflags::bitflags;
 use crate::fpoly::EPolyFlags;
 use crate::math::{FPlane, FSphere, FVector};
 

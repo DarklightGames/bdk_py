@@ -1,9 +1,8 @@
 use cgmath::{Vector3, InnerSpace};
 use arrayvec::ArrayVec;
-use bitflags::{bitflags};
-use math::{THRESH_SPLIT_POLY_PRECISELY};
+use bitflags::bitflags;
+use math::THRESH_SPLIT_POLY_PRECISELY;
 use crate::fpoly::ESplitPlaneStatus::Front;
-use crate::fpoly::ESplitType::Back;
 use crate::math::{self, FLOAT_NORMAL_THRESH, SMALL_NUMBER, THRESH_POINT_ON_PLANE};
 use crate::math::{point_plane_distance, line_plane_intersection, THRESH_SPLIT_POLY_WITH_PLANE, points_are_near, THRESH_ZERO_NORM_SQUARED};
 use crate::model::UModel;

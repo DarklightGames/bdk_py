@@ -23,7 +23,7 @@ pub fn try_to_merge(poly1: &mut FPoly, poly2: &mut FPoly) -> bool {
         return false
     }
 
-    let (mut start1, mut start2) = matching_indices.unwrap();
+    let (start1, start2) = matching_indices.unwrap();
 
     println!("Found matching indices: ({}, {})", start1, start2);
 
@@ -35,13 +35,13 @@ pub fn try_to_merge(poly1: &mut FPoly, poly2: &mut FPoly) -> bool {
 
     if points_are_same(&poly1.vertices[test1], &poly2.vertices[test2]) {
         end1 = test1;
-        start2 = test2;
+        // start2 = test2;
     } else {
         test1 = if start1 == 0 { poly1.vertices.len() - 1 } else { start1 - 1 };
         test2 = (start2 + 1) % poly2.vertices.len();
 
         if points_are_same(&poly1.vertices[test1], &poly2.vertices[test2]) {
-            start1 = test1;
+            // start1 = test1;
             end2 = test2;
         } else {
             return false

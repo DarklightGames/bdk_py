@@ -1,4 +1,3 @@
-use arrayvec::ArrayVec;
 use bdk_rs::{self, fpoly};
 
 use cgmath::{InnerSpace, Vector3};
