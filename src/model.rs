@@ -59,11 +59,11 @@ pub struct FBspSurf {
 }
 
 /// Max vertices in a Bsp node, pre clipping.
-const BSP_NODE_MAX_NODE_VERTICES: usize = 16;
+pub const BSP_NODE_MAX_NODE_VERTICES: usize = 16;
 /// Max vertices in a Bsp node, post clipping.
-const BSP_NODE_MAX_FINAL_VERTICES: usize = 24;
+pub const BSP_NODE_MAX_FINAL_VERTICES: usize = 24;
 /// Max zones per level.
-const BSP_NODE_MAX_ZONES: usize = 64;
+pub const BSP_NODE_MAX_ZONES: usize = 64;
 
 /// FBspNode defines one node in the Bsp, including the front and back
 /// pointers and the polygon data itself.  A node may have 0 or 3 to (MAX_NODE_VERTICES-1)

@@ -2,9 +2,9 @@ use arrayvec::ArrayVec;
 use bdk_rs::{self, fpoly};
 
 use cgmath::{InnerSpace, Vector3};
-use bdk_rs::fpoly::{ESplitType, FPoly, RemoveColinearsResult};
+use fpoly::{ESplitType, FPoly, RemoveColinearsResult};
 use bdk_rs::math::FVector;
-use bdk_rs::fpoly::EPolyFlags;
+use fpoly::EPolyFlags;
 
 #[test]
 fn fpoly_reverse_test() {
@@ -409,6 +409,24 @@ fn fpoly_remove_colinears_concave_test() {
 }
 
 #[test]
+fn fpoly_remove_colinears_redundant_vertex_test() {
+    let mut fpoly = FPoly::from_vertices(&[
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),    // This vertex is redundant and should be removed.
+        FVector::new(2.0, 0.0, 0.0),
+    ]);
+
+    assert_eq!(fpoly.remove_colinears(), RemoveColinearsResult::Convex);
+    assert_eq!(fpoly.vertices.len(), 3);
+    assert_eq!(fpoly.vertices.to_vec(), vec![
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(2.0, 0.0, 0.0),
+    ]);
+}
+
+#[test]
 fn fpoly_on_poly_point_coincident_test() {
     let fpoly = FPoly::from_vertices(&[
         FVector::new(0.0, 0.0, 0.0),
@@ -489,8 +507,7 @@ fn fpoly_split_quad_test() {
 
     assert_eq!(result, 4);
     assert_eq!(fpoly.vertices.len(), result);
-    let fpoly_vertices = fpoly.vertices.to_vec();
-    assert_eq!(fpoly_vertices, vec![
+    assert_eq!(fpoly.vertices.to_vec(), vec![
         FVector::new(0.5, 0.0, 0.0),
         FVector::new(1.0, 0.0, 0.0),
         FVector::new(1.0, 1.0, 0.0),

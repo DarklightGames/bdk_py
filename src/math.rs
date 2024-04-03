@@ -4,15 +4,15 @@ use cgmath::{Vector3, InnerSpace};
 pub type FVector = Vector3<f32>;
 
 pub struct FSphere {
-    origin: FVector,
-    radius: f32
+    pub origin: FVector,
+    pub radius: f32
 }
 
 pub struct FPlane {
-    x: f32,
-    y: f32,
-    z: f32,
-    w: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
 }
 
 impl FPlane {

@@ -9,7 +9,7 @@ use crate::math::{point_plane_distance, line_plane_intersection, THRESH_SPLIT_PO
 use crate::model::UModel;
 
 /// Maximum vertices an FPoly may have.
-const FPOLY_MAX_VERTICES: usize = 16;
+pub const FPOLY_MAX_VERTICES: usize = 16;
 /// Threshold for splitting into two.
 const FPOLY_VERTEX_THRESHOLD: usize = FPOLY_MAX_VERTICES - 2;
 
@@ -226,8 +226,6 @@ impl FPoly {
         let mut side1 = self.vertices[1] - self.vertices[0];
         for i in 2..self.vertices.len() {
             let side2 = self.vertices[i] - self.vertices[0];
-            println!("{:?}", side1);
-            println!("{:?}", side2);
             area += side1.cross(side2).magnitude();
             side1 = side2;
         }
@@ -490,15 +488,11 @@ impl FPoly {
         }
 
         while i < self.vertices.len() {
-            let j = if i == 0 {
-                self.vertices.len() - 1
-            } else {
-                i - 1
-            };
+            let j = if i == 0 { self.vertices.len() - 1 } else { i - 1 };
 
             // Create cutting plane perpendicular to both this side and the polygon's normal.
             let side = self.vertices[i] - self.vertices[j];
-            let side_plane_normal = side.cross(self.normal);    // TODO: does original cross product normalize the result?
+            let side_plane_normal = side.cross(self.normal);
 
             if side_plane_normal.dot(side_plane_normal) < SMALL_NUMBER {
                 // Eliminate these nearly identical points.
@@ -507,7 +501,6 @@ impl FPoly {
                 if self.vertices.len() < 3 {
                     // Collapsed.
                     self.vertices.clear();
-                    println!("Collapsed top");
                     return RemoveColinearsResult::Collapsed;
                 }
                 if i > 0 {
@@ -524,12 +517,7 @@ impl FPoly {
         i = 0;
 
         while i < self.vertices.len() {
-            let j = if i == 0 {
-                self.vertices.len() - 1
-            } else {
-                i - 1
-            };
-
+            let j = (i + 1) % self.vertices.len();
             if points_are_near(&side_plane_normals[i], &side_plane_normals[j], FLOAT_NORMAL_THRESH) {
                 // Eliminate colinear points.
                 self.vertices.remove(i);
@@ -537,7 +525,6 @@ impl FPoly {
                 if self.vertices.len() < 3 {
                     // Collapsed.
                     self.vertices.clear();
-                    println!("Collapsed");
                     return RemoveColinearsResult::Collapsed;
                 }
                 if i > 0 {
