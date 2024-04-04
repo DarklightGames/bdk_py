@@ -1,5 +1,5 @@
 use bitflags::bitflags;
-use crate::fpoly::EPolyFlags;
+use crate::fpoly::{EPolyFlags, FPoly};
 use crate::math::{FPlane, FSphere, FVector};
 
 pub struct FBspVertex {
@@ -133,6 +133,7 @@ impl FBspNode {
 /// One vertex associated with a Bsp node's polygon.  Contains a vertex index
 /// into the level's FPoints table, and a unique number which is common to all
 /// other sides in the level which are cospatial with this side.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FVert {
     pub vertex_index: usize,
     pub side_index: Option<usize>,
@@ -144,4 +145,18 @@ pub struct UModel {
     pub vectors: Vec<FVector>,
     pub nodes: Vec<FBspNode>,
     pub surfaces: Vec<FBspSurf>,
+    pub polys: Vec<FPoly>,
+}
+
+impl UModel {
+    pub fn new() -> UModel {
+        UModel {
+            vertices: Vec::new(),
+            points: Vec::new(),
+            vectors: Vec::new(),
+            nodes: Vec::new(),
+            surfaces: Vec::new(),
+            polys: Vec::new(),
+        }
+    }
 }

@@ -1,4 +1,5 @@
 use cgmath::{Vector3, InnerSpace};
+use crate::coords::FCoords;
 
 
 pub type FVector = Vector3<f32>;
@@ -16,6 +17,10 @@ pub struct FPlane {
 }
 
 impl FPlane {
+    pub fn normal(&self) -> FVector {
+        FVector::new(self.x, self.y, self.z)
+    }
+
     pub fn plane_dot(&self, p: FVector) -> f32 {
         (self.x * p.x) + (self.y * p.y) + (self.z * p.z) - self.w
     }
@@ -95,4 +100,34 @@ pub fn line_plane_intersection(point1: &FVector, point2: &FVector, plane_base: &
         + ((point2 - point1) *
             ((plane_base - point1).dot(*plane_normal)
                 / (point2 - point1).dot(*plane_normal)))
+}
+
+// ============================================================================
+// FVector functions
+// ============================================================================
+
+/// Transform a directional vector by a coordinate system.
+/// Ignore's the coordinate system's origin.
+/// 
+/// Previously `FVector::TransformVectorBy`.
+pub fn transform_vector_by_coords(v: &FVector, coords: &FCoords) -> FVector {
+    FVector {
+        x: v.dot(coords.x_axis),
+        y: v.dot(coords.y_axis),
+        z: v.dot(coords.z_axis),
+    }
+}
+
+/// Mirror a vector about a normal vector.
+/// 
+/// Previously `FVector::MirrorByVector`.
+pub fn mirror_vector_by_normal(v: FVector, normal: FVector) -> FVector {
+    v - normal * (2.0 * v.dot(normal))
+}
+
+/// Mirror a vector about a plane.
+///
+/// Previously `FVector::MirrorByPlane`.
+pub fn mirror_vector_by_plane(v: FVector, plane: FPlane) -> FVector {
+    v - plane.normal() * (2.0 * plane.plane_dot(v))
 }

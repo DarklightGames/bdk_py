@@ -662,7 +662,6 @@ impl FPoly {
         if self.is_coplanar(other) {
             return false;
         }
-
         // If this poly is frontfaced relative to all of ther other poly's vertices, they're not facing.
         for other_vertex in &other.vertices {
             if !self.is_backfaced(other_vertex) {
@@ -675,7 +674,6 @@ impl FPoly {
                 return false;
             }
         }
-
         false
     }
 }

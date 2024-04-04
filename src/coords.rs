@@ -1,0 +1,76 @@
+use crate::math::FVector;
+use crate::math::{transform_vector_by_coords, mirror_vector_by_normal};
+
+pub struct FCoords {
+    pub origin: FVector,
+    pub x_axis: FVector,
+    pub y_axis: FVector,
+    pub z_axis: FVector,
+}
+
+impl FCoords {
+
+    pub fn new() -> FCoords {
+        FCoords {
+            origin: FVector::new(0.0, 0.0, 0.0),
+            x_axis: FVector::new(1.0, 0.0, 0.0),
+            y_axis: FVector::new(0.0, 1.0, 0.0),
+            z_axis: FVector::new(0.0, 0.0, 1.0),
+        }
+    }
+
+    pub fn new_from_origin(origin: &FVector) -> FCoords {
+        FCoords {
+            origin: *origin,
+            x_axis: FVector::new(1.0, 0.0, 0.0),
+            y_axis: FVector::new(0.0, 1.0, 0.0),
+            z_axis: FVector::new(0.0, 0.0, 1.0),
+        }
+    }
+
+    pub fn new_from_origin_and_axes(origin: &FVector, x_axis: &FVector, y_axis: &FVector, z_axis: &FVector) -> FCoords {
+        FCoords {
+            origin: *origin,
+            x_axis: *x_axis,
+            y_axis: *y_axis,
+            z_axis: *z_axis,
+        }
+    }
+
+    pub fn mirror_by_vector(&self, mirror_normal: FVector) -> FCoords {
+        FCoords {
+            origin: mirror_vector_by_normal(self.origin, mirror_normal),
+            x_axis: mirror_vector_by_normal(self.x_axis, mirror_normal),
+            y_axis: mirror_vector_by_normal(self.y_axis, mirror_normal),
+            z_axis: mirror_vector_by_normal(self.z_axis, mirror_normal),
+        }
+    }
+
+    pub fn mirror_by_plane(&self, plane_base: &FVector, plane_normal: &FVector) -> FCoords {
+        !todo!("Implement mirror_by_plane")
+    }
+
+    /// Return this coordinate system's transpose.
+    /// If the coordinate system is orthogonal, this is equivalent to its inverse.
+    pub fn transpose(&self) -> FCoords {
+        FCoords {
+            origin: -transform_vector_by_coords(&self.origin, self),    // TODO: order may be incorrect, original is `-Origin.TransformVectorBy(*this)`
+            x_axis: FVector::new(self.x_axis.x, self.y_axis.x, self.z_axis.x),
+            y_axis: FVector::new(self.x_axis.y, self.y_axis.y, self.z_axis.y),
+            z_axis: FVector::new(self.x_axis.z, self.y_axis.z, self.z_axis.z),
+        }
+    }
+
+    pub fn inverse() -> FCoords {
+        !todo!("Implement inverse")
+    }
+
+    pub fn pivot_inverse() -> FCoords {
+        !todo!("Implement pivot_inverse")
+    }
+
+    pub fn apply_pivot(other: &FCoords) -> FCoords {
+        !todo!("Implement apply_pivot")
+    }
+
+}
