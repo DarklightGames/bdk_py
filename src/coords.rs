@@ -1,6 +1,7 @@
 use crate::math::FVector;
 use crate::math::{transform_vector_by_coords, mirror_vector_by_normal};
 
+#[derive(Clone, Copy, Debug)]
 pub struct FCoords {
     pub origin: FVector,
     pub x_axis: FVector,
@@ -73,4 +74,37 @@ impl FCoords {
         !todo!("Implement apply_pivot")
     }
 
+}
+
+/// A model coordinate system, describing both the covariant and contravariant
+/// transformation matrices to transform points and normals by.
+#[derive(Clone, Copy, Debug)]
+pub struct FModelCoords {
+    /// Coordinates to transform points by  (covariant). 
+    pub covariant: FCoords,
+    /// Coordinates to transform vectors by (contravariant).
+    pub contravariant: FCoords,
+}
+
+impl FModelCoords {
+    pub fn new() -> FModelCoords {
+        FModelCoords {
+            covariant: FCoords::new(),
+            contravariant: FCoords::new(),
+        }
+    }
+
+    pub fn new_with_coords(covariant: &FCoords, contravariant: &FCoords) -> FModelCoords {
+        FModelCoords {
+            covariant: *covariant,
+            contravariant: *contravariant,
+        }
+    }
+
+    pub fn inverse(&self) -> FModelCoords {
+        FModelCoords {
+            covariant: self.contravariant.transpose(),
+            contravariant: self.covariant.transpose(),
+        }
+    }
 }

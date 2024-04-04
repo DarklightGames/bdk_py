@@ -2,8 +2,9 @@ use cgmath::{Vector3, InnerSpace};
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
 use math::THRESH_SPLIT_POLY_PRECISELY;
+use crate::coords::FModelCoords;
 use crate::fpoly::ESplitPlaneStatus::Front;
-use crate::math::{self, FLOAT_NORMAL_THRESH, SMALL_NUMBER, THRESH_POINT_ON_PLANE};
+use crate::math::{self, transform_vector_by_coords, FLOAT_NORMAL_THRESH, SMALL_NUMBER, THRESH_POINT_ON_PLANE};
 use crate::math::{point_plane_distance, line_plane_intersection, THRESH_SPLIT_POLY_WITH_PLANE, points_are_near, THRESH_ZERO_NORM_SQUARED};
 use crate::model::UModel;
 
@@ -676,4 +677,23 @@ impl FPoly {
         }
         false
     }
+
+    /// Transform an editor polygon with a coordinate system, a pre-transformation
+    /// addition, and a post-transformation addition:
+    pub fn transform(&mut self, coords: &FModelCoords, pre_subtract: &FVector, post_add: &FVector, orientation: f32) {
+        self.texture_u = transform_vector_by_coords(&self.texture_u, &coords.contravariant);
+        self.texture_v = transform_vector_by_coords(&self.texture_v, &coords.contravariant);
+        self.base = transform_vector_by_coords(&(self.base - pre_subtract), &coords.covariant) + post_add;
+        self.vertices.iter_mut().for_each(|vertex| {
+            *vertex = transform_vector_by_coords(&(*vertex - pre_subtract), &coords.covariant) + post_add;
+        });
+	    // Flip vertex order if orientation is negative.
+        if orientation < 0.0 {
+            self.vertices.reverse();
+        }
+        // Transform normal.  Since the transformation coordinate system is
+        // orthogonal but not orthonormal, it has to be renormalized here.
+        self.normal = transform_vector_by_coords(&self.normal, &coords.contravariant).normalize();
+    }
+
 }

@@ -1,4 +1,4 @@
-use bdk_rs::{self, fpoly};
+use bdk_rs::{self, coords::FModelCoords, fpoly};
 
 use cgmath::{InnerSpace, Vector3};
 use fpoly::{ESplitType, FPoly, RemoveColinearsResult};
@@ -462,6 +462,7 @@ fn fpoly_on_poly_point_outside_test() {
 
 #[test]
 fn fpoly_insert_vertex_middle_test() {
+    // Arrange
     let mut fpoly = FPoly::from_vertices(&[
         FVector::new(0.0, 0.0, 0.0),
         FVector::new(1.0, 0.0, 0.0),
@@ -470,14 +471,18 @@ fn fpoly_insert_vertex_middle_test() {
     ]);
     let new_vertex = FVector::new(0.5, 0.5, 0.0);
     let insert_index = 2;
+
+    // Act
     fpoly.insert_vertex(insert_index, &new_vertex);
 
+    // Assert
     assert_eq!(fpoly.vertices.len(), 5);
     assert_eq!(fpoly.vertices[insert_index], new_vertex);
 }
 
 #[test]
 fn fpoly_insert_vertex_end_test() {
+    // Arrange
     let mut fpoly = FPoly::from_vertices(&[
         FVector::new(0.0, 0.0, 0.0),
         FVector::new(1.0, 0.0, 0.0),
@@ -486,14 +491,18 @@ fn fpoly_insert_vertex_end_test() {
     ]);
     let new_vertex = FVector::new(0.5, 0.5, 0.0);
     let insert_index = 4;
+
+    // Act
     fpoly.insert_vertex(insert_index, &new_vertex);
 
+    // Assert
     assert_eq!(fpoly.vertices.len(), 5);
     assert_eq!(fpoly.vertices[insert_index], new_vertex);
 }
 
 #[test]
 fn fpoly_split_quad_test() {
+    // Arrange
     let mut fpoly = FPoly::from_vertices(&[
         FVector::new(0.0, 0.0, 0.0),
         FVector::new(1.0, 0.0, 0.0),
@@ -502,8 +511,11 @@ fn fpoly_split_quad_test() {
     ]);
     let plane_base = FVector::new(0.5, 0.5, 0.0);
     let plane_normal = Vector3::unit_x();
+
+    // Act
     let result = fpoly.split(&plane_normal, &plane_base, false);
 
+    // Assert
     assert_eq!(result, 4);
     assert_eq!(fpoly.vertices.len(), result);
     assert_eq!(fpoly.vertices.to_vec(), vec![
@@ -512,4 +524,34 @@ fn fpoly_split_quad_test() {
         FVector::new(1.0, 1.0, 0.0),
         FVector::new(0.5, 1.0, 0.0),
     ]);
+}
+
+/// Test that a polygon that is transformed with the identity transformation
+/// remains unchanged.
+#[test]
+fn fpoly_transform_identity_test() {
+    // Arrange
+    let mut fpoly = FPoly::from_vertices(&[
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.0, 1.0, 0.0),
+    ]);
+    let coords = FModelCoords::new();
+    let pre_subtract = FVector::new(0.0, 0.0, 0.0);
+    let post_add = FVector::new(0.0, 0.0, 0.0);
+    let orientation = 0.0;
+
+    // Act
+    fpoly.transform(&coords, &pre_subtract, &post_add, orientation);
+    
+    // Assert
+    assert_eq!(fpoly.vertices.len(), 4);
+    assert_eq!(fpoly.vertices.to_vec(), vec![
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+        FVector::new(0.0, 1.0, 0.0),
+    ]);
+    assert_eq!(fpoly.normal, Vector3::unit_z());
 }
