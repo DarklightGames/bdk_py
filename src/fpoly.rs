@@ -7,6 +7,9 @@ use crate::fpoly::ESplitPlaneStatus::Front;
 use crate::math::{self, transform_vector_by_coords, FLOAT_NORMAL_THRESH, SMALL_NUMBER, THRESH_POINT_ON_PLANE};
 use crate::math::{point_plane_distance, line_plane_intersection, THRESH_SPLIT_POLY_WITH_PLANE, points_are_near, THRESH_ZERO_NORM_SQUARED};
 use crate::model::UModel;
+use crate::brush::ABrush;
+use std::rc::{Rc, Weak};
+use std::cell::RefCell;
 
 /// Maximum vertices an FPoly may have.
 pub const FPOLY_MAX_VERTICES: usize = 16;
@@ -128,15 +131,15 @@ pub struct FPoly {
     /// FPoly & Bsp poly bit flags (PF_).
     pub poly_flags: EPolyFlags,
     /// Brush where this originated, or NULL.
-    //actor: Rc<ABrush>,
+    pub actor: Option<Rc<RefCell<ABrush>>>,
     /// Material.
     //material: Rc<UMaterial>,
     /// Item name.
     //item_name: FName,
     /// iBspSurf, or brush fpoly index of first identical polygon, or MAXWORD.
-    pub link: Option<i32>,
+    pub link: Option<usize>,
     /// Index of editor solid's polygon this originated from.
-    pub brush_poly: Option<i32>,
+    pub brush_poly_index: Option<usize>,
     /// Used by multiple vertex editing to keep track of original PolyIndex into owner brush
     pub save_poly_index: Option<i32>,
     /// A temporary place to save the poly normal during vertex editing
@@ -174,8 +177,9 @@ impl FPoly {
             texture_v: FVector { x: 0.0, y: 0.0, z: 0.0 },
             vertices: Default::default(),
             poly_flags: EPolyFlags::from_bits_retain(0),
+            actor: None,
             link: None,
-            brush_poly: None,
+            brush_poly_index: None,
             save_poly_index: None,
             save_normal: FVector { x: 0.0, y: 0.0, z: 0.0 },
             uv: [
@@ -680,7 +684,7 @@ impl FPoly {
 
     /// Transform an editor polygon with a coordinate system, a pre-transformation
     /// addition, and a post-transformation addition:
-    pub fn transform(&mut self, coords: &FModelCoords, pre_subtract: &FVector, post_add: &FVector, orientation: f32) {
+    pub fn transform(&mut self, coords: &FModelCoords, pre_subtract: &FVector, post_add: &FVector, orientation: f32) -> &mut Self {
         self.texture_u = transform_vector_by_coords(&self.texture_u, &coords.contravariant);
         self.texture_v = transform_vector_by_coords(&self.texture_v, &coords.contravariant);
         self.base = transform_vector_by_coords(&(self.base - pre_subtract), &coords.covariant) + post_add;
@@ -694,6 +698,7 @@ impl FPoly {
         // Transform normal.  Since the transformation coordinate system is
         // orthogonal but not orthonormal, it has to be renormalized here.
         self.normal = transform_vector_by_coords(&self.normal, &coords.contravariant).normalize();
+        self
     }
 
 }

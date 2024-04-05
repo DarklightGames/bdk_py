@@ -1,6 +1,7 @@
 use bitflags::bitflags;
 use crate::fpoly::{EPolyFlags, FPoly};
 use crate::math::{FPlane, FSphere, FVector};
+use crate::box_::FBox;
 
 pub struct FBspVertex {
     pub position: FVector,
@@ -44,6 +45,7 @@ bitflags! {
 /// polygon's plane.  Does not include a point list; the actual points
 /// are stored along with Bsp nodes, since several nodes which lie in the
 /// same plane may reference the same poly.
+#[derive(Debug, PartialEq)]
 pub struct FBspSurf {
     //pub material: Rc<UMaterial>,
     pub poly_flags: EPolyFlags,
@@ -76,6 +78,7 @@ pub const BSP_NODE_MAX_ZONES: usize = 64;
 /// If iPlane==INDEX_NONE, a node has no coplanars.  Otherwise iPlane
 /// is an index to a coplanar polygon in the Bsp.  All polygons that are iPlane
 /// children can only have iPlane children themselves, not fronts or backs.
+#[derive(Debug, PartialEq)]
 pub struct FBspNode {
     /// Plane the node falls into (X, Y, Z, W).
     pub plane: FPlane,
@@ -139,6 +142,27 @@ pub struct FVert {
     pub side_index: Option<usize>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+/// Information about a convex volume.
+pub struct FLeaf {
+    /// The zone this convex volume is in.
+    zone_index: usize,
+    /// Lights permeating this volume considering shadowing.
+    permeating: usize,
+    /// Volumetric lights hitting this region, no shadowing.
+    volumentic: usize,
+    /// Bit mask of visible zones from this convex volume.
+    visible_zone_bits: u64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FZoneProperties {
+    // zone_actor: ??
+    connectivity_bits: u64,
+    visibility_bits: u64,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct UModel {
     pub vertices: Vec<FVert>,
     pub points: Vec<FVector>,
@@ -146,6 +170,10 @@ pub struct UModel {
     pub nodes: Vec<FBspNode>,
     pub surfaces: Vec<FBspSurf>,
     pub polys: Vec<FPoly>,
+    pub bounds: Vec<FBox>,
+    pub leaf_hulls: Vec<usize>,
+    pub leaves: Vec<FLeaf>,
+    pub zones: Vec<FZoneProperties>,
 }
 
 impl UModel {
@@ -157,6 +185,61 @@ impl UModel {
             nodes: Vec::new(),
             surfaces: Vec::new(),
             polys: Vec::new(),
+            bounds: Vec::new(),
+            leaf_hulls: Vec::new(),
+            leaves: Vec::new(),
+            zones: Vec::new(),
         }
+    }
+
+    /// Empty the contents of a model.
+    pub fn empty_model(&mut self, empty_surface_info: bool, empty_polys: bool) {
+        // Ensure all projectors are destroyed.
+
+        /*
+        // Ensure all projectors are destroyed
+        for( INT i=0; i<Nodes.Num(); i++ )
+        {
+            FBspNode& Node = Nodes(i);
+            INT j;
+            while( (j=Node.Projectors.Num()) > 0)
+            {
+                Node.Projectors(j-1)->RenderInfo->RemoveReference();
+                delete Node.Projectors(j-1);
+                Node.Projectors.Remove(j-1);		
+            }
+        }
+        */
+
+        self.nodes.clear();
+        self.bounds.clear();
+        self.leaf_hulls.clear();
+        self.leaves.clear();
+        self.vertices.clear();
+        // self.lights.clear();
+        // self.light_maps.clear();
+        // self.dynamic_light_maps.clear();
+        // self.light_map_textures.clear();
+        // self.sections.clear();
+
+        if empty_surface_info {
+            self.vectors.clear();
+            self.points.clear();
+            self.surfaces.clear();
+        }
+
+        if empty_polys {
+            self.polys.clear();
+        }
+
+        /*
+        NumZones = 0;
+        for( INT i=0; i<FBspNode::MAX_ZONES; i++ )
+        {
+            Zones[i].ZoneActor    = NULL;
+            Zones[i].Connectivity = ((QWORD)1)<<i;
+            Zones[i].Visibility   = ~(QWORD)0;
+        }	
+        */
     }
 }

@@ -1,6 +1,7 @@
+use bdk_rs::coords::FModelCoords;
 use bdk_rs::math::FVector;
 use bdk_rs::bsp::{merge_coplanars, try_to_merge};
-use bdk_rs::fpoly::FPoly;
+use bdk_rs::fpoly::{self, FPoly};
 use bdk_rs::model::UModel;
 
 #[test]
@@ -112,9 +113,62 @@ fn create_unit_cube_polys() -> [FPoly; 6] {
     polys
 }
 
+fn create_quad_grid(width: usize, height: usize) -> Vec<FPoly> {
+    let mut polys: Vec<FPoly> = Vec::new();
+    for y in 0..height {
+        for x in 0..width {
+            polys.push(FPoly::from_vertices(&vec![
+                FVector::new(x as f32, y as f32, 0.0),
+                FVector::new((x + 1) as f32, y as f32, 0.0),
+                FVector::new((x + 1) as f32, (y + 1) as f32, 0.0),
+                FVector::new(x as f32, (y + 1) as f32, 0.0),
+            ]));
+        }
+    }
+    polys
+}
+
 #[test]
-fn merge_coplanars_test() {
-    let mut model = UModel::new();
-    // TODO: add a number of polys to the model, all of which are coplanar, with some that can be merged.
-    
+fn merge_coplanars_quad_grid_test() {
+    // Arrange
+    let mut polys = create_quad_grid(2, 2);
+    let poly_indices = [0, 1, 2, 3];
+
+    // Act
+    let merge_count = merge_coplanars(&mut polys, &poly_indices);
+
+    // Assert
+    assert_eq!(merge_count, 3);
+    let merged_polys = polys.iter().filter(|p| p.vertices.len() > 0).collect::<Vec<&FPoly>>();
+    assert_eq!(merged_polys.len(), 1);
+    assert_eq!(merged_polys[0].vertices.to_vec(), vec![
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(2.0, 0.0, 0.0),
+        FVector::new(2.0, 2.0, 0.0),
+        FVector::new(0.0, 2.0, 0.0),
+    ]);
+}
+
+#[test]
+fn merge_coplanars_quad_grid_with_skipped_index_test() {
+    // Arrange
+    let mut polys = create_quad_grid(2, 2);
+    let poly_indices = [0, 1, 3];
+
+    // Act
+    let merge_count = merge_coplanars(&mut polys, &poly_indices);
+
+    // Assert
+    assert_eq!(merge_count, 1);
+    let merged_polys = polys.iter().filter(|p| p.vertices.len() > 0).collect::<Vec<&FPoly>>();
+    println!("{:?}", merged_polys.iter().map(|f| f.vertices.to_vec()).collect::<Vec<Vec<FVector>>>());
+    assert_eq!(merged_polys.len(), 3);
+    assert_eq!(merged_polys[0].vertices.to_vec(), vec![
+        FVector::new(0.0, 1.0, 0.0),
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(2.0, 0.0, 0.0),
+        FVector::new(2.0, 1.0, 0.0),
+    ]);
+    assert_eq!(merged_polys[1].vertices.to_vec(), polys[2].vertices.to_vec());
+    assert_eq!(merged_polys[2].vertices.to_vec(), polys[3].vertices.to_vec());
 }

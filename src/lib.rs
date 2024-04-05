@@ -7,3 +7,4 @@ pub mod model;
 pub mod box_;
 pub mod sphere;
 pub mod coords;
+pub mod brush;

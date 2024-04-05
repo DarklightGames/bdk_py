@@ -1,8 +1,41 @@
 use cgmath::InnerSpace;
 
-use crate::math::points_are_same;
-use crate::fpoly::{FPoly, RemoveColinearsResult, FPOLY_MAX_VERTICES};
-use crate::model::{UModel, BSP_NODE_MAX_NODE_VERTICES};
+use crate::coords::{FCoords, FModelCoords};
+use crate::math::{FVector, points_are_same};
+use crate::fpoly::{EPolyFlags, FPoly, RemoveColinearsResult, FPOLY_MAX_VERTICES};
+use crate::model::{EBspNodeFlags, UModel, BSP_NODE_MAX_NODE_VERTICES};
+use crate::brush::ABrush;
+use std::borrow::BorrowMut;
+use std::rc::Rc;
+use std::cell::RefCell;
+
+/// Possible positions of a child Bsp node relative to its parent (for `BspAddToNode`).
+pub enum ENodePlace {
+    /// Node is in back of parent              -> `Bsp[iParent].iBack`.
+    Back,
+    /// Node is in front of parent             -> `Bsp[iParent].iFront`.
+    Front,
+    /// Node is coplanar with parent           -> `Bsp[iParent].iPlane`.
+    Plane,
+    /// Node is the Bsp root and has no parent -> `Bsp[0]`.
+    Root,
+}
+
+/// Status of filtered polygons:
+pub enum EPolyNodeFilter {
+    /// Leaf is an exterior leaf (visible to viewers).
+   Outside,
+   // Leaf is an interior leaf (non-visible, hidden behind backface).
+   Inside,
+   /// Poly is coplanar and in the exterior (visible to viewers).
+   CoplanarOutside,
+   /// Poly is coplanar and inside (invisible to viewers).
+   CoplanarInside,
+   /// Poly is coplanar, cospatial, and facing in.
+   CospatialFacingIn,
+   /// Poly is coplanar, cospatial, and facing out.
+   CospatialFacingOut,
+}
 
 /// Trys to merge two polygons.  If they can be merged, replaces Poly1 and emptys Poly2
 /// and returns true.  Otherwise, returns false.
@@ -86,24 +119,24 @@ pub fn try_to_merge(poly1: &mut FPoly, poly2: &mut FPoly) -> bool {
 /// 
 /// - Note that this assumes that all the polygons in the list are coplanar.
 /// - This function now returns the number of polygons merged.
-pub fn merge_coplanars(model: &mut UModel, poly_indices: &[usize]) -> usize {
+pub fn merge_coplanars(polys: &mut [FPoly], poly_indices: &[usize]) -> usize {
     let mut merged_count: usize = 0;
     let mut merge_again = true;
     while merge_again {
         merge_again = false;
         for i in 0..poly_indices.len() {
-            let poly1 = &model.polys[poly_indices[i]];
+            let poly1 = &polys[poly_indices[i]];
             if poly1.vertices.len() == 0 {
                 // Polygon has already been merged away.
                 continue
             }
             for j in i + 1..poly_indices.len() {
-                if let Ok([poly1, poly2]) = model.polys.get_many_mut([poly_indices[i], poly_indices[j]]) {
+                if let Ok([poly1, poly2]) = polys.get_many_mut([poly_indices[i], poly_indices[j]]) {
                     if poly2.vertices.len() == 0 {
                         continue
                     }
                     if try_to_merge(poly1, poly2) {
-                        println!("Merged polygons {} and {}", poly_indices[i], poly_indices[j]);
+                        println!("Merged polygons {} into {}", poly_indices[j], poly_indices[i]);
                         merged_count += 1;
                         merge_again = true;
                     }
@@ -114,6 +147,7 @@ pub fn merge_coplanars(model: &mut UModel, poly_indices: &[usize]) -> usize {
     merged_count
 }
 
+// TODO: not tested!
 /// Merge near points that are near.
 ///
 /// - Returns the number of points merged and the number of points collapsed.
@@ -172,4 +206,185 @@ pub fn merge_near_points(model: &mut UModel, dist: f32) -> (usize, usize) {
     }
 
     (merged, collapsed)
+}
+
+
+fn bsp_add_node(model: &mut UModel, node_index: Option<usize>, node_place: ENodePlace, node_flags: EBspNodeFlags, ed_poly: &mut FPoly) {
+    !todo!()
+}
+
+
+/// Global variables shared between bspBrushCSG and AddWorldToBrushFunc.  These are very
+/// tightly tied into the function AddWorldToBrush, not general-purpose.
+struct RebuildContext {
+    /// Level map Model we're adding to.
+    g_model: Rc<UModel>,
+    /// Node AddBrushToWorld is adding to.
+    g_node: usize,
+    /// Last coplanar beneath GNode at start of AddWorldToBrush.
+    g_last_coplanar: Option<usize>,
+    /// Number of polys discarded and not added.
+    g_discarded: usize,
+    /// Errors encountered in Csg operation.
+    g_errors: usize,
+}
+
+fn add_brush_to_world(model: &mut UModel, node_index: Option<usize>, ed_poly: &mut FPoly, filter: EPolyNodeFilter, node_place: ENodePlace) {
+    match filter {
+        EPolyNodeFilter::Outside | EPolyNodeFilter::CoplanarOutside => {
+            bsp_add_node(model, node_index, node_place, EBspNodeFlags::IsNew, ed_poly);
+        }
+        EPolyNodeFilter::CospatialFacingOut => {
+            if !ed_poly.poly_flags.contains(EPolyFlags::Semisolid) {
+                bsp_add_node(model, node_index, node_place, EBspNodeFlags::IsNew, ed_poly);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn add_world_to_brush(context: &mut RebuildContext, model: &mut UModel, node_index: Option<usize>, ed_poly: &mut FPoly, filter: EPolyNodeFilter, _: ENodePlace) {
+    // Get a mutable refernce from the Rc<UModel> and add the node.
+    let g_model = Rc::get_mut(&mut context.g_model).unwrap();
+    match filter {
+        EPolyNodeFilter::Outside | EPolyNodeFilter::CoplanarOutside => {
+            // Only affect the world poly if it has been cut.
+            if ed_poly.poly_flags.contains(EPolyFlags::EdCut) {
+                bsp_add_node(g_model, context.g_last_coplanar, ENodePlace::Plane, EBspNodeFlags::IsNew, ed_poly);
+            }
+        }
+        _ => {
+            // Discard original poly.
+            if g_model.nodes[context.g_node].vertex_count > 0 {
+                g_model.nodes[context.g_node].vertex_count = 0;
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ECsgOper {
+    Add,
+    Subtract,
+    Intersect,
+    Deintersect,
+}
+
+type BspFilterFunc = fn(model: &mut UModel, node_index: usize, ed_poly: &mut FPoly, filter: EPolyNodeFilter, node_place: ENodePlace);
+
+fn bsp_filter_fpoly(filter_func: BspFilterFunc, model: &mut UModel, ed_poly: &mut FPoly) {
+    !todo!()
+}
+
+fn add_brush_to_world_func(model: &mut UModel, node_index: usize, ed_poly: &mut FPoly, filter: EPolyNodeFilter, node_place: ENodePlace) {
+    !todo!();
+}
+
+fn subtract_brush_from_world_func(model: &mut UModel, node_index: usize, ed_poly: &mut FPoly, filter: EPolyNodeFilter, node_place: ENodePlace) {
+    !todo!();
+}
+
+fn intersect_brush_with_world_func(model: &mut UModel, node_index: usize, ed_poly: &mut FPoly, filter: EPolyNodeFilter, node_place: ENodePlace) {
+    !todo!();
+}
+
+fn deintersect_brush_with_world_func(model: &mut UModel, node_index: usize, ed_poly: &mut FPoly, filter: EPolyNodeFilter, node_place: ENodePlace) {
+    !todo!();
+}
+
+/// Perform any CSG operation between the brush and the world.
+fn bsp_brush_csg(actor: &mut Rc<RefCell<ABrush>>, model: &mut UModel, poly_flags: EPolyFlags, csg_operation: ECsgOper, should_build_bounds: bool, should_merge_polys: bool) {
+    // Non-solid and semisolid stuff can only be added.
+    let not_poly_flags = match csg_operation {
+        ECsgOper::Add => EPolyFlags::Semisolid | EPolyFlags::NotSolid,
+        _ => EPolyFlags::empty()
+    };
+
+    let mut num_polys_from_brush = 0usize;
+
+    // TODO: we're making a whole new model here, but the original code uses a global and clears it.
+    let mut temp_model: UModel = UModel::new();
+    temp_model.empty_model(true, true);
+
+    // Build the brush's coordinate system and find orientation of scale
+	// transform (if negative, edpolyTransform will reverse the clockness
+	// of the EdPoly points and invert the normal).
+    let (coords, uncoords, orientation) = ABrush::build_coords();
+
+	// Transform original brush poly into same coordinate system as world
+	// so Bsp filtering operations make sense.
+    let pre_pivot = actor.borrow().pre_pivot;
+    let location = actor.borrow().location;
+    let actor_copy = actor.clone();
+    let brush_ptr = Rc::get_mut(actor).unwrap().borrow_mut().get_mut();
+    let brush = Rc::get_mut(&mut brush_ptr.model).unwrap().get_mut();
+    for (poly_index, poly) in brush.polys.iter().enumerate() {
+		// Set texture the first time.
+        // SKIPPED
+
+        // Get the brush poly.
+        let mut dest_ed_poly = poly.clone();
+        assert!(brush.polys[poly_index].link.is_none() && brush.polys[poly_index].link.unwrap() < brush.polys.len());
+
+        // Set its backward brush link.
+        dest_ed_poly.actor = Some(actor_copy.clone());
+        dest_ed_poly.brush_poly_index = Some(poly_index);
+
+        // Update its flags.
+        dest_ed_poly.poly_flags = (dest_ed_poly.poly_flags | poly_flags) & !not_poly_flags;
+
+        // Set its internal link.
+        if dest_ed_poly.link.is_none() {
+            dest_ed_poly.link = Some(poly_index);
+        }
+
+        // Transform it.
+        dest_ed_poly.transform(&coords, &pre_pivot, &location, orientation);
+
+        // Add poly to the temp model.
+        temp_model.polys.push(dest_ed_poly);
+    }
+
+    let filter_func = match csg_operation {
+        ECsgOper::Add => add_brush_to_world_func,
+        ECsgOper::Subtract => subtract_brush_from_world_func,
+        ECsgOper::Intersect => intersect_brush_with_world_func,
+        ECsgOper::Deintersect => deintersect_brush_with_world_func,
+    };
+
+    // Pass the brush polys through the world Bsp.
+    match csg_operation {
+        ECsgOper::Intersect | ECsgOper::Deintersect => {
+            // Empty the brush.
+            brush.empty_model(true, true);
+
+            // Intersect and deintersect.
+            for poly in &mut temp_model.polys {
+                // TODO: global variable GModel is not defined or used yet.
+                // GModel = Brush;
+                bsp_filter_fpoly(filter_func, model, poly);
+            }
+            num_polys_from_brush = brush.polys.len();
+        },
+        ECsgOper::Add | ECsgOper::Subtract => {
+            for (i, poly) in brush.polys.iter().enumerate() {
+                let mut ed_poly = poly.clone();
+                // Mark the polygon as non-cut so that it won't be harmed unless it must
+                 // be split, and set iLink so that BspAddNode will know to add its information
+                 // if a node is added based on this poly.
+                ed_poly.poly_flags &= !EPolyFlags::EdCut;
+
+                if ed_poly.link == Some(i) {
+                    temp_model.polys[i].link = Some(model.surfaces.len());
+                    ed_poly.link = Some(model.surfaces.len());
+                } else {
+                    ed_poly.link = temp_model.polys[ed_poly.link.unwrap()].link;
+                }
+
+                // Filter brush through the world.
+                bsp_filter_fpoly(filter_func, model, &mut ed_poly);
+            }
+        }
+        _ => {}
+    }
 }

@@ -86,6 +86,12 @@ pub struct FModelCoords {
     pub contravariant: FCoords,
 }
 
+impl Default for FModelCoords {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FModelCoords {
     pub fn new() -> FModelCoords {
         FModelCoords {
