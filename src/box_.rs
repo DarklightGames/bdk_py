@@ -10,6 +10,12 @@ pub struct FBox {
     pub is_valid: bool
 }
 
+impl Default for FBox {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // A rectangular minimum bounding volume.
 impl FBox {
 
@@ -33,6 +39,19 @@ impl FBox {
         let mut box_ = FBox::new();
         box_.add_points(points);
         box_
+    }
+
+    pub fn corners(&self) -> [FVector; 8] {
+        [
+            FVector::new(self.min.x, self.min.y, self.min.z),
+            FVector::new(self.min.x, self.min.y, self.max.z),
+            FVector::new(self.min.x, self.max.y, self.min.z),
+            FVector::new(self.min.x, self.max.y, self.max.z),
+            FVector::new(self.max.x, self.min.y, self.min.z),
+            FVector::new(self.max.x, self.min.y, self.max.z),
+            FVector::new(self.max.x, self.max.y, self.min.z),
+            FVector::new(self.max.x, self.max.y, self.max.z),
+        ]
     }
 
     // Returns the midpoint between the min and max points.

@@ -1,10 +1,11 @@
 use cgmath::InnerSpace;
 
 use crate::coords::{FCoords, FModelCoords};
-use crate::math::{FVector, points_are_same};
+use crate::math::{points_are_same, points_are_near, FVector, THRESH_VECTORS_ARE_NEAR};
 use crate::fpoly::{EPolyFlags, FPoly, RemoveColinearsResult, FPOLY_MAX_VERTICES};
 use crate::model::{EBspNodeFlags, UModel, BSP_NODE_MAX_NODE_VERTICES};
 use crate::brush::ABrush;
+use crate::sphere::FSphere;
 use std::borrow::BorrowMut;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -35,6 +36,13 @@ pub enum EPolyNodeFilter {
    CospatialFacingIn,
    /// Poly is coplanar, cospatial, and facing out.
    CospatialFacingOut,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum EBspOptimization {
+	Lame,
+	Good,
+	Optimal,
 }
 
 /// Trys to merge two polygons.  If they can be merged, replaces Poly1 and emptys Poly2
@@ -292,6 +300,81 @@ fn deintersect_brush_with_world_func(model: &mut UModel, node_index: usize, ed_p
     !todo!();
 }
 
+/// Merge all coplanar EdPolys in a model.  Not transactional.
+/// Preserves (though reorders) iLinks.
+fn bsp_merge_coplanars(model: &mut UModel, should_remap_links: bool, should_merge_disparate_textures: bool) {
+    let original_num = model.polys.len();
+
+    // Mark all polys as unprocessed.
+    model.polys.iter_mut().for_each(|poly| poly.poly_flags.remove(EPolyFlags::EdProcessed));
+
+    // Find matching coplanars and merge them.
+    let mut poly_list: Vec<usize> = Vec::new();
+    let mut n = 0;
+
+    for i in 0..model.polys.len() {
+        {
+            let ed_poly = &mut model.polys[i];
+            if ed_poly.vertices.is_empty() || ed_poly.poly_flags.contains(EPolyFlags::EdProcessed) {
+                continue;
+            }
+            ed_poly.poly_flags |= EPolyFlags::EdProcessed;
+        }
+
+        let mut poly_count = 0;
+        poly_list[poly_count] = i;
+        poly_count += 1;
+
+        for j in i + 1..model.polys.len() {
+            let [ed_poly, other_poly] = model.polys.get_many_mut([i, j]).unwrap();
+            if other_poly.link != ed_poly.link {
+                continue;
+            }
+            let distance = (other_poly.vertices[0] - ed_poly.vertices[0]).dot(ed_poly.normal);
+            // TODO: make this easier to understand what it's doing.
+            let a = distance > -0.001 && distance < 0.001 && other_poly.normal.dot(ed_poly.normal) > 0.999;
+            let b = should_merge_disparate_textures || (
+                points_are_near(&other_poly.texture_u, &ed_poly.texture_u, THRESH_VECTORS_ARE_NEAR) &&
+                points_are_near(&other_poly.texture_v, &ed_poly.texture_v, THRESH_VECTORS_ARE_NEAR)
+            );
+            if a && b {
+                other_poly.poly_flags |= EPolyFlags::EdProcessed;
+                poly_list[poly_count] = j;
+                poly_count += 1;
+            }
+        }
+
+        if poly_count > 1 {
+            merge_coplanars(&mut model.polys, poly_list.as_slice());
+            n += 1;
+        }
+    }
+
+    println!("Found {} coplanar sets in {}", n, model.polys.len());
+
+    // Get rid of empty EdPolys while remapping iLinks.
+    let mut remap = vec![0usize; model.polys.len()];
+    let mut j = 0;
+    for i in 0..model.polys.len() {
+        if !model.polys[i].vertices.is_empty() {
+            remap.push(j);
+            model.polys[j] = model.polys[i].clone();
+            j += 1;
+        }
+    }
+    model.polys.truncate(j);
+
+    if should_remap_links {
+        for poly in model.polys.iter_mut() {
+            if poly.link.is_some() {
+                poly.link = Some(remap[poly.link.unwrap()]);
+            }
+        }
+    }
+
+    println!("BspMergeCoplanars reduced {}->{}", original_num, model.polys.len());
+}
+
 /// Perform any CSG operation between the brush and the world.
 fn bsp_brush_csg(actor: &mut Rc<RefCell<ABrush>>, model: &mut UModel, poly_flags: EPolyFlags, csg_operation: ECsgOper, should_build_bounds: bool, should_merge_polys: bool) {
     // Non-solid and semisolid stuff can only be added.
@@ -385,6 +468,104 @@ fn bsp_brush_csg(actor: &mut Rc<RefCell<ABrush>>, model: &mut UModel, poly_flags
                 bsp_filter_fpoly(filter_func, model, &mut ed_poly);
             }
         }
+    }
+
+    if !model.nodes.is_empty() && (poly_flags & (EPolyFlags::NotSolid | EPolyFlags::Semisolid)).is_empty() {
+		// Quickly build a Bsp for the brush, tending to minimize splits rather than balance
+		// the tree.  We only need the cutting planes, though the entire Bsp struct (polys and
+		// all) is built.
+        bsp_build(&mut temp_model, EBspOptimization::Lame, 0, 70, true, 0);
+
+        //GModel = Brush;
+        temp_model.build_bound();
+
+        let bounding_sphere = temp_model.bounding_sphere.clone();
+        filter_world_through_brush(model, &mut temp_model, csg_operation, 0, &bounding_sphere);
+    }
+
+    match csg_operation {
+        ECsgOper::Intersect | ECsgOper::Deintersect => {
+            // Link polys obtained from the original brush.
+            for i in num_polys_from_brush-1..0 {    // TODO: this may not be right
+                let mut j = 0;
+                while j < i {
+                    let [dest_ed_poly, other] = brush.polys.get_many_mut([i, j]).unwrap();
+                    if dest_ed_poly.link == other.link {
+                        dest_ed_poly.link = Some(j);
+                        break
+                    }
+                    j += 1;
+                }
+                if j >= i {
+                    brush.polys[i].link = Some(i);
+                }
+            }
+
+            // Link polys obtained from the world.
+            for i in model.polys.len()-1..num_polys_from_brush {    // TODO: this may not be right
+                let mut j = num_polys_from_brush;
+                while j < i {
+                    let [dest_ed_poly, other] = brush.polys.get_many_mut([i, j]).unwrap();
+                    if dest_ed_poly.link == other.link {
+                        dest_ed_poly.link = Some(j);
+                        break
+                    
+                    }
+                    j += 1;
+                }
+                if j >= i {
+                    brush.polys[i].link = Some(i);
+                }
+            }
+
+            brush.linked = true;
+
+            // Detransform the obtained brush back into its original coordinate system.
+            for (i, dest_ed_poly) in brush.polys.iter_mut().enumerate() {
+                dest_ed_poly.transform(&uncoords, &location, &pre_pivot, orientation);
+                dest_ed_poly.fix();
+                dest_ed_poly.actor = None;
+                dest_ed_poly.brush_poly_index = Some(i);
+            }
+        },
+        ECsgOper::Add | ECsgOper::Subtract => {
+            // Clean up nodes, reset node flags.
+            bsp_cleanup(model);
+
+            // Rebuild bounding volumes.
+            if should_build_bounds {
+                bsp_build_bounds(model);
+            }
+        }
+    }
+
+    // Release TempModel.
+    temp_model.empty_model(true, true);
+
+    // Merge coplanars if needed.
+    match csg_operation {
+        ECsgOper::Add | ECsgOper::Subtract => {
+            if should_merge_polys {
+                bsp_merge_coplanars(brush, true, false);
+            }
+        },
         _ => {}
     }
+}
+
+fn bsp_cleanup(model: &mut UModel) {
+    !todo!()
+}
+
+fn bsp_build_bounds(model: &mut UModel) {
+    !todo!()
+}
+
+fn bsp_build(model: &UModel, optimization: EBspOptimization, balance: u8, portal_bias: u8, rebuild_simple_polys: bool, node_index: usize) {
+    !todo!()
+}
+
+/// Filter all relevant world polys through the brush.
+fn filter_world_through_brush(model: &mut UModel, brush: &mut UModel, csg_operation: ECsgOper, node_index: usize, bounding_sphere: &FSphere) {
+    !todo!()
 }

@@ -1,6 +1,7 @@
 use bitflags::bitflags;
 use crate::fpoly::{EPolyFlags, FPoly};
-use crate::math::{FPlane, FSphere, FVector};
+use crate::math::{FPlane, FVector};
+use crate::sphere::FSphere;
 use crate::box_::FBox;
 
 pub struct FBspVertex {
@@ -174,6 +175,10 @@ pub struct UModel {
     pub leaf_hulls: Vec<usize>,
     pub leaves: Vec<FLeaf>,
     pub zones: Vec<FZoneProperties>,
+    pub bounding_sphere: FSphere,
+    pub bounding_box: FBox,
+
+    pub linked: bool,
 }
 
 impl UModel {
@@ -189,6 +194,9 @@ impl UModel {
             leaf_hulls: Vec::new(),
             leaves: Vec::new(),
             zones: Vec::new(),
+            bounding_sphere: FSphere::default(),
+            bounding_box: FBox::default(),
+            linked: false,
         }
     }
 
@@ -241,5 +249,14 @@ impl UModel {
             Zones[i].Visibility   = ~(QWORD)0;
         }	
         */
+    }
+
+    /// Build the model's bounds (min and max).
+    pub fn build_bound(&mut self) {
+        self.bounding_box = FBox::default();
+        for poly in &self.polys {
+            self.bounding_box.add_points(&poly.vertices);
+        }
+        self.bounding_sphere = FSphere::from(&self.bounding_box);
     }
 }

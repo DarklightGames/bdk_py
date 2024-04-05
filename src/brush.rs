@@ -21,6 +21,6 @@ impl ABrush {
             covariant: FCoords::new(),
             contravariant: FCoords::new().transpose(),
         };
-        (coords, coords, 0.0)
+        (coords, uncoords, 0.0)
     }
 }

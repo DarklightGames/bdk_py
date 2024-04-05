@@ -5,12 +5,6 @@ use crate::coords::FCoords;
 pub type FVector = Vector3<f32>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FSphere {
-    pub origin: FVector,
-    pub radius: f32
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FPlane {
     pub x: f32,
     pub y: f32,

@@ -3,9 +3,16 @@ use crate::box_::FBox;
 
 type FVector = Vector3<f32>;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FSphere {
     pub origin: FVector,
     pub radius: f32
+}
+
+impl From<&FBox> for FSphere {
+    fn from(box_: &FBox) -> Self {
+        FSphere::new_from_points([box_.min, box_.max].as_slice())
+    }
 }
 
 impl FSphere {
@@ -36,5 +43,11 @@ impl FSphere {
         }
         let radius = max_distance_squared.sqrt() * 1.001;
         FSphere::new_from_origin_and_radius(&origin, radius)
+    }
+}
+
+impl Default for FSphere {
+    fn default() -> Self {
+        Self::new()
     }
 }
