@@ -14,7 +14,7 @@ use std::cell::RefCell;
 /// Maximum vertices an FPoly may have.
 pub const FPOLY_MAX_VERTICES: usize = 16;
 /// Threshold for splitting into two.
-const FPOLY_VERTEX_THRESHOLD: usize = FPOLY_MAX_VERTICES - 2;
+pub const FPOLY_VERTEX_THRESHOLD: usize = FPOLY_MAX_VERTICES - 2;
 
 type FVector = Vector3<f32>;
 

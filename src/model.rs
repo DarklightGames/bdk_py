@@ -179,6 +179,7 @@ pub struct UModel {
     pub bounding_box: FBox,
 
     pub linked: bool,
+    pub is_root_outside: bool,
 }
 
 impl UModel {
@@ -197,6 +198,7 @@ impl UModel {
             bounding_sphere: FSphere::default(),
             bounding_box: FBox::default(),
             linked: false,
+            is_root_outside: true
         }
     }
 
