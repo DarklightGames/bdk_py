@@ -317,8 +317,48 @@ fn bsp_filter_fpoly(filter_func: BspFilterFunc, model: &mut UModel, ed_poly: &mu
 }
 
 /// Handle a piece of a polygon that was filtered to a leaf.
-fn filter_leaf(filter_func: BspFilterFunc, model: &mut UModel, node_index: usize, ed_poly: &mut FPoly, coplanar_info: FCoplanarInfo, leaf_outside: bool, node_place: ENodePlace) {
-    !todo!();
+fn filter_leaf(filter_func: BspFilterFunc, model: &mut UModel, node_index: usize, ed_poly: &mut FPoly, mut coplanar_info: FCoplanarInfo, mut leaf_outside: bool, node_place: ENodePlace) {
+
+    let mut done_filtering_back = false;
+
+    if coplanar_info.original_node.is_none() {
+		// Processing regular, non-coplanar polygons.
+        let filter_type = if leaf_outside { EPolyNodeFilter::Outside } else { EPolyNodeFilter::Inside };
+
+        filter_func(model, node_index, ed_poly, filter_type, node_place);
+    } else if coplanar_info.is_processing_back {
+		// Finished filtering polygon through tree in back of parent coplanar.
+        done_filtering_back = true;
+    } else {
+        coplanar_info.front_leaf_outside = leaf_outside;
+
+        match coplanar_info.back_node_index {
+            None => {
+                // Back tree is empty.
+                leaf_outside = coplanar_info.is_back_node_outside;
+                done_filtering_back = true;
+            }
+            Some(back_node_index) => {
+                // Call FilterEdPoly to filter through the back.  This will result in
+                // another call to FilterLeaf with iNode = leaf this falls into in the
+                // back tree and EdPoly = the final EdPoly to insert.
+                coplanar_info.is_processing_back = true;
+
+                filter_ed_poly(filter_func, model, back_node_index, ed_poly, coplanar_info, coplanar_info.is_back_node_outside);
+            }
+        }
+    }
+
+    if done_filtering_back {
+        let filter_type = match (leaf_outside, coplanar_info.front_leaf_outside) {
+            (false, false) => EPolyNodeFilter::CoplanarInside,
+            (true, true) => EPolyNodeFilter::CoplanarOutside,
+            (false, true) => EPolyNodeFilter::CospatialFacingOut,
+            (true, false) => EPolyNodeFilter::CospatialFacingIn,
+        };
+        filter_func(model, coplanar_info.original_node.unwrap(), ed_poly, filter_type, ENodePlace::Plane);
+    }
+
 }
 
 // Filter an EdPoly through the Bsp recursively, calling FilterFunc
