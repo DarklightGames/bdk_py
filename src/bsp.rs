@@ -1012,3 +1012,111 @@ fn bsp_build(model: &UModel, optimization: EBspOptimization, balance: u8, portal
 fn filter_world_through_brush(model: &mut UModel, brush: &mut UModel, csg_operation: ECsgOper, node_index: usize, bounding_sphere: &FSphere) {
     !todo!()
 }
+
+fn find_best_split(polys: &[FPoly], optimization: EBspOptimization, balance: u8, portal_bias: u8) -> Option<usize> {
+
+    let mut best_poly_index: Option<usize> = None;
+
+    let portal_bias = portal_bias as f32 / 100.0;
+
+    let step = match optimization {
+        EBspOptimization::Optimal => 1,
+        EBspOptimization::Lame => 1.max(polys.len() / 20),
+        EBspOptimization::Good => 1.max(polys.len() / 4),
+    };
+
+    // See if there are any non-semisolid polygons here.
+    let all_semi_solids = polys.iter().all(|poly| !poly.poly_flags.contains(EPolyFlags::AddLast));
+
+	// Search through all polygons in the pool and find:
+	// A. The number of splits each poly would make.
+	// B. The number of front and back nodes the polygon would create.
+	// C. Number of coplanars.
+    let mut best_score = 0.0f32;
+
+    // Iterate over the polys with the given step.
+    for i in (0..polys.len()).step_by(step) {
+        let mut splits = 0;
+        let mut front = 0;
+        let mut back = 0;
+        let mut coplanars = 0;
+        let poly = &polys[i];
+
+        let mut poly_index = 0usize;
+
+        // Find the next poly that is not semisolid or is a portal.
+        // This is very confusing. Come back when not sleepy.
+        /*
+        do
+		{
+			Index++;
+			Poly = PolyList[Index];
+		} while(
+			Index < (i + Inc) && 
+			Index < NumPolys && 
+			((Poly->PolyFlags & PF_AddLast) && !(Poly->PolyFlags & PF_Portal)) &&
+			!AllSemiSolids );
+         */
+
+        if poly_index >= i + step || poly_index >= polys.len() {
+            continue;
+        }
+
+        for j in 0..polys.len() {
+            let other_poly = &polys[j];
+            if i == j {
+                continue;
+            }
+
+            match other_poly.split_with_plane_fast(&poly.vertices[0], &poly.normal) {
+                ESplitType::Coplanar => {
+                    coplanars += 1;
+                }
+                ESplitType::Front => {
+                    front += 1;
+                },
+                ESplitType::Back => {
+                    back += 1;
+                },
+                ESplitType::Split(_, _) => {
+					// Disfavor splitting polys that are zone portals.
+                    if !other_poly.poly_flags.contains(EPolyFlags::Portal) {
+                        splits += 1;
+                    } else {
+                        splits += 16;
+                    }
+                },
+            }
+
+            // Score optimization: minimize cuts vs. balance tree (as specified in BSP Rebuilder dialog)
+            let score = {
+                let mut score = (100.0 - balance as f32) * splits as f32 + (balance as f32) * ((front - back) as f32).abs();
+                if poly.poly_flags.contains(EPolyFlags::Portal) {
+                    // PortalBias enables level designers to control the effect of Portals on the BSP.
+                    // This effect can range from 0.0 (ignore portals), to 1.0 (portals cut everything).
+                    //
+                    // In builds prior to this (since the 221 build dating back to 1/31/1999) the bias
+                    // has been 1.0 causing the portals to cut the BSP in ways that will potentially
+                    // degrade level performance, and increase the BSP complexity.
+                    // 
+                    // By setting the bias to a value between 0.3 and 0.7 the positive effects of 
+                    // the portals are preserved without giving them unreasonable priority in the BSP.
+                    //
+                    // Portals should be weighted high enough in the BSP to separate major parts of the
+                    // level from each other (pushing entire rooms down the branches of the BSP), but
+                    // should not be so high that portals cut through adjacent geometry in a way that
+                    // increases complexity of the room being (typically, accidentally) cut.
+                    score -= (100.0 - balance as f32) * splits as f32 * portal_bias;
+                }
+                score
+            };
+
+            if score < best_score || best_poly_index.is_none() {
+                best_poly_index = Some(poly_index);
+                best_score = score;
+            }
+        }
+    }
+
+    None
+}
