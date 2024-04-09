@@ -1,8 +1,8 @@
 use bdk_rs::coords::FModelCoords;
 use bdk_rs::math::FVector;
-use bdk_rs::bsp::{merge_coplanars, try_to_merge};
+use bdk_rs::bsp::{merge_coplanars, try_to_merge, bsp_add_node};
 use bdk_rs::fpoly::{self, FPoly};
-use bdk_rs::model::UModel;
+use bdk_rs::model::{self, EBspNodeFlags, UModel};
 
 #[test]
 fn try_to_merge_disjoint_test() {
@@ -171,4 +171,24 @@ fn merge_coplanars_quad_grid_with_skipped_index_test() {
     ]);
     assert_eq!(merged_polys[1].vertices.to_vec(), polys[2].vertices.to_vec());
     assert_eq!(merged_polys[2].vertices.to_vec(), polys[3].vertices.to_vec());
+}
+
+
+#[test]
+fn bsp_add_node_root_node() {
+    let mut model = UModel::new();
+    let poly = FPoly::from_vertices(&vec![
+        FVector::new(0.0, 0.0, 0.0),
+        FVector::new(1.0, 0.0, 0.0),
+        FVector::new(1.0, 1.0, 0.0),
+    ]);
+    bsp_add_node(&mut model, 
+        0, 
+        bdk_rs::bsp::ENodePlace::Root, 
+        EBspNodeFlags::empty(),
+        &poly
+    );
+
+    println!("{:?}", model.nodes);
+
 }

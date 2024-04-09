@@ -86,6 +86,9 @@ bitflags! {
 	    const EdCut       		= 0x80000000;
         /// Occludes even if PF_NoOcclude.
 	    const Occlude			= 0x80000000;
+
+        // PF_NoAddToBSP		= PF_EdCut | PF_EdProcessed | PF_Selected | PF_Memorized,
+        const NoAddToBSP = 0x80000000 | 0x40000000 | 0x02000000 | 0x01000000;
     }
 }
 

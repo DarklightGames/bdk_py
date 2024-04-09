@@ -1,5 +1,5 @@
 use cgmath::{Vector3, InnerSpace};
-use crate::coords::FCoords;
+use crate::{coords::FCoords, model::FBspNode};
 
 
 pub type FVector = Vector3<f32>;
@@ -13,6 +13,25 @@ pub struct FPlane {
 }
 
 impl FPlane {
+    pub fn new() -> FPlane {
+        FPlane {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 0.0,
+        }
+    }
+
+    pub fn new_from_origin_and_normal(origin: &FVector, normal: &FVector) -> FPlane {
+        let w = origin.dot(*normal);
+        FPlane {
+            x: normal.x,
+            y: normal.y,
+            z: normal.z,
+            w,
+        }
+    }
+
     pub fn normal(&self) -> FVector {
         FVector::new(self.x, self.y, self.z)
     }
