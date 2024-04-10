@@ -1,5 +1,5 @@
-use bdk_rs::{self, box_};
-use bdk_rs::math::FVector;
+use bdk_py::box_;
+use bdk_py::math::FVector;
 
 use box_::FBox;
 

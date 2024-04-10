@@ -8,7 +8,7 @@ use crate::math::{self, transform_vector_by_coords, FLOAT_NORMAL_THRESH, SMALL_N
 use crate::math::{point_plane_distance, line_plane_intersection, THRESH_SPLIT_POLY_WITH_PLANE, points_are_near, THRESH_ZERO_NORM_SQUARED};
 use crate::model::UModel;
 use crate::brush::ABrush;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::cell::RefCell;
 
 /// Maximum vertices an FPoly may have.

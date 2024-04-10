@@ -10,6 +10,7 @@ pub mod coords;
 pub mod brush;
 
 use pyo3::prelude::*;
+use crate::fpoly::FPoly;
 
 #[pyclass]
 struct Poly {
@@ -45,8 +46,6 @@ impl Brush {
         Brush { polys, poly_flags, csg_operation: CsgOperation::Add }
     }
 }
-
-use crate::fpoly::FPoly;
 
 impl From<Poly> for FPoly {
     fn from(poly: Poly) -> Self {

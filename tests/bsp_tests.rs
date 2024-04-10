@@ -1,7 +1,7 @@
-use bdk_rs::math::FVector;
-use bdk_rs::bsp::{EBspOptimization, merge_coplanars, try_to_merge, bsp_add_node, find_best_split};
-use bdk_rs::fpoly::FPoly;
-use bdk_rs::model::{EBspNodeFlags, UModel};
+use bdk_py::math::FVector;
+use bdk_py::bsp::{EBspOptimization, ENodePlace, merge_coplanars, try_to_merge, bsp_add_node, find_best_split};
+use bdk_py::fpoly::FPoly;
+use bdk_py::model::{EBspNodeFlags, UModel};
 
 #[test]
 fn try_to_merge_disjoint_test() {
@@ -227,7 +227,6 @@ fn find_best_split_test() {
     assert_eq!(split_index, Some(1))
 }
 
-
 #[test]
 fn bsp_add_node_root_node() {
     let mut model = UModel::new();
@@ -238,7 +237,7 @@ fn bsp_add_node_root_node() {
     ]);
     bsp_add_node(&mut model, 
         0, 
-        bdk_rs::bsp::ENodePlace::Root, 
+        ENodePlace::Root, 
         EBspNodeFlags::empty(),
         &poly
     );

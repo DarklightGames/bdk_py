@@ -1,5 +1,5 @@
-use bdk_rs::{self, sphere};
-use bdk_rs::math::FVector;
+use bdk_py::{self, sphere};
+use bdk_py::math::FVector;
 
 use sphere::FSphere;
 

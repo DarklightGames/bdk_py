@@ -1,5 +1,5 @@
 [package]
-name = "bdk_rs"
+name = "bdk_py"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,7 +7,7 @@ edition = "2021"
 
 [lib]
 name = "bdk_py"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 
 [dependencies]
 cgmath = "0.18.0"

@@ -1,8 +1,8 @@
-use bdk_rs::{self, coords::FModelCoords, fpoly};
+use bdk_py::{coords::FModelCoords, fpoly};
 
 use cgmath::{InnerSpace, Vector3};
 use fpoly::{ESplitType, FPoly, RemoveColinearsResult};
-use bdk_rs::math::FVector;
+use bdk_py::math::FVector;
 use fpoly::EPolyFlags;
 
 #[test]

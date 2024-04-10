@@ -1,8 +1,6 @@
-use bitflags::Flags;
 use cgmath::InnerSpace;
 
-use crate::coords::{FCoords, FModelCoords};
-use crate::math::{points_are_near, points_are_same, FVector, FPlane, THRESH_NORMALS_ARE_SAME, THRESH_POINTS_ARE_NEAR, THRESH_POINTS_ARE_SAME, THRESH_VECTORS_ARE_NEAR};
+use crate::math::{points_are_near, points_are_same, FVector, FPlane, THRESH_VECTORS_ARE_NEAR};
 use crate::fpoly::{EPolyFlags, ESplitType, FPoly, RemoveColinearsResult, FPOLY_MAX_VERTICES, FPOLY_VERTEX_THRESHOLD};
 use crate::model::{EBspNodeFlags, FBspNode, FBspSurf, FVert, UModel, BSP_NODE_MAX_NODE_VERTICES};
 use crate::brush::ABrush;
