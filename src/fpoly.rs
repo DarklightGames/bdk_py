@@ -167,6 +167,7 @@ impl FPoly {
     pub fn from_vertices(vertices: &[FVector]) -> Self {
         let mut fpoly = FPoly::new();
         _ = fpoly.vertices.try_extend_from_slice(vertices);
+        // fpoly.base = fpoly.vertices[0];  // TODO: the selection of the base vertex seems arbitrary.
         _ = fpoly.calc_normal();
         fpoly
     }

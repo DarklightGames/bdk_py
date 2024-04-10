@@ -526,6 +526,30 @@ fn fpoly_split_quad_test() {
     ]);
 }
 
+#[test]
+fn fpoly_from_vertices_normal_test() {
+    let poly = FPoly::from_vertices(&[
+        FVector::new(-1.0, -1.0, 1.0),
+        FVector::new( 1.0, -1.0, 1.0),
+        FVector::new( 1.0,  1.0, 1.0),
+        FVector::new(-1.0,  1.0, 1.0),
+    ]);
+
+    assert_eq!(poly.normal, Vector3::unit_z());
+}
+
+#[test]
+fn fpoly_from_vertices_base_test() {
+    let poly = FPoly::from_vertices(&[
+        FVector::new(-1.0, -1.0, 1.0),
+        FVector::new( 1.0, -1.0, 1.0),
+        FVector::new( 1.0,  1.0, 1.0),
+        FVector::new(-1.0,  1.0, 1.0),
+    ]);
+
+    // assert_eq!(poly.base, FVector::new(-1.0, -1.0, 1.0));
+}
+
 /// Test that a polygon that is transformed with the identity transformation
 /// remains unchanged.
 #[test]

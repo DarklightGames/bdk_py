@@ -253,6 +253,17 @@ impl UModel {
         }
     }
 
+    pub fn shrink_model(&mut self) {
+        self.vectors.shrink_to_fit();
+        self.points.shrink_to_fit();
+        self.vertices.shrink_to_fit();
+        self.nodes.shrink_to_fit();
+        self.surfaces.shrink_to_fit();
+        self.polys.shrink_to_fit();
+        self.bounds.shrink_to_fit();
+        self.leaf_hulls.shrink_to_fit();
+    }
+
     /// Empty the contents of a model.
     pub fn empty_model(&mut self, empty_surface_info: bool, empty_polys: bool) {
         // Ensure all projectors are destroyed.

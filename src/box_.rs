@@ -27,12 +27,8 @@ impl FBox {
         }
     }
 
-    pub fn new_from_min_max(min: &FVector, max: &FVector) -> FBox {
-        FBox {
-            min: *min,
-            max: *max,
-            is_valid: true
-        }
+    pub fn new_from_min_max(min: FVector, max: FVector) -> FBox {
+        FBox { min, max, is_valid: true }
     }
 
     pub fn new_from_points(points: &[FVector]) -> FBox {
@@ -96,8 +92,8 @@ impl FBox {
 
     pub fn expand_by(&self, w: f32) -> FBox {
         FBox::new_from_min_max(
-            &(self.min - FVector::new(w, w, w)), 
-            &(self.max + FVector::new(w, w, w))
+            self.min - FVector::new(w, w, w), 
+            self.max + FVector::new(w, w, w)
         )
     }
 

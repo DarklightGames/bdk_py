@@ -242,5 +242,9 @@ fn bsp_add_node_root_node() {
         &poly
     );
 
-    println!("{:?}", model.nodes);
+    assert!(model.nodes.len() == 1); 
 }
+
+// #[test]
+// fn bsp_brush_csg() {
+// }
