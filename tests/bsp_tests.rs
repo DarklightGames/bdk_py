@@ -1,8 +1,7 @@
-use bdk_rs::coords::FModelCoords;
 use bdk_rs::math::FVector;
 use bdk_rs::bsp::{EBspOptimization, merge_coplanars, try_to_merge, bsp_add_node, find_best_split};
-use bdk_rs::fpoly::{self, FPoly};
-use bdk_rs::model::{self, EBspNodeFlags, UModel};
+use bdk_rs::fpoly::FPoly;
+use bdk_rs::model::{EBspNodeFlags, UModel};
 
 #[test]
 fn try_to_merge_disjoint_test() {
@@ -78,6 +77,7 @@ fn try_to_merge_identical_triangles_test() {
     assert_eq!(try_to_merge(&mut poly1, &mut poly2), false);
 }
 
+/// Creates a unit cube with 6 polygons, with normals pointing outwards.
 fn create_unit_cube_polys() -> [FPoly; 6] {
     // Diagram of a unit cube:
     //
