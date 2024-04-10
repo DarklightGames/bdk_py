@@ -45,7 +45,7 @@ pub enum EPolyNodeFilter {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum EBspOptimization {
+pub enum EBspOptimization {
 	Lame,
 	Good,
 	Optimal,
@@ -1013,11 +1013,116 @@ fn filter_world_through_brush(model: &mut UModel, brush: &mut UModel, csg_operat
     !todo!()
 }
 
-fn find_best_split(polys: &[FPoly], optimization: EBspOptimization, balance: u8, portal_bias: u8) -> Option<usize> {
 
-    let mut best_poly_index: Option<usize> = None;
+/// Pick a splitter poly then split a pool of polygons into front and back polygons and
+/// recurse.
+//
+/// iParent = Parent Bsp node, or INDEX_NONE if this is the root node.
+/// IsFront = 1 if this is the front node of iParent, 0 of back (undefined if iParent==INDEX_NONE)
+pub fn split_poly_list(
+    model: &mut UModel, 
+    parent_node_index: Option<usize>, 
+    node_place: ENodePlace, 
+    polys: &mut Vec<FPoly>,
+    poly_indices: &[usize],
+    optimization: EBspOptimization, 
+    balance: u8, 
+    portal_bias: u8, 
+    rebuild_simple_polys: bool
+) {
+	// To account for big EdPolys split up.
+    let num_polys_to_alloc = poly_indices.len() + 8 + poly_indices.len() / 4;
 
+    let mut front_poly_indices = Vec::with_capacity(num_polys_to_alloc);
+    let mut back_poly_indices = Vec::with_capacity(num_polys_to_alloc);
+    // TODO: make a slice that iterates over only the indices passed in.
+    let split_poly_index = find_best_split_recursive(polys, poly_indices, optimization, balance, portal_bias);
+
+	// Add the splitter poly to the Bsp with either a new BspSurf or an existing one.
+    if rebuild_simple_polys {
+        if let Some(split_poly_index) = split_poly_index {
+            let split_poly = &mut polys[split_poly_index];
+            split_poly.link = None
+        }
+    }
+
+    let split_poly = &polys[split_poly_index.unwrap()]; // TODO: if the spliy poly function is always assumed to return a valid index, just don't wrap it in an optional.
+    let our_node_index = bsp_add_node(model, parent_node_index.unwrap(), node_place, EBspNodeFlags::empty(), split_poly);
+    let mut plane_node_index = our_node_index;
+
+	// Now divide all polygons in the pool into (A) polygons that are
+	// in front of Poly, and (B) polygons that are in back of Poly.
+	// Coplanar polys are inserted immediately, before recursing.
+
+	// If any polygons are split by Poly, we ignrore the original poly,
+	// split it into two polys, and add two new polys to the pool.
+
+    for poly_index in poly_indices {
+        if *poly_index == split_poly_index.unwrap() {
+            continue;
+        }
+
+        let [ed_poly, split_poly] = polys.get_many_mut([*poly_index, split_poly_index.unwrap()]).unwrap();
+        let split_result = ed_poly.split_with_plane(split_poly.vertices[0], split_poly.normal, false);
+        match split_result {
+            ESplitType::Coplanar => {
+                if rebuild_simple_polys {
+                    ed_poly.link = Some(model.surfaces.len() - 1);
+                    plane_node_index = bsp_add_node(model, plane_node_index, ENodePlace::Plane, EBspNodeFlags::empty(), ed_poly);
+                }
+            }
+            ESplitType::Front => {
+                front_poly_indices.push(*poly_index);
+            }
+            ESplitType::Back => {
+                back_poly_indices.push(*poly_index);
+            }
+            ESplitType::Split(mut front_poly, mut back_poly) => {
+				// Create front & back nodes.
+				// If newly-split polygons have too many vertices, break them up in half.
+                if front_poly.vertices.len() >= FPOLY_VERTEX_THRESHOLD {
+                    let split_poly = front_poly.split_in_half().unwrap();
+                    front_poly_indices.extend([front_poly_indices.len(), front_poly_indices.len() + 1]);
+                    polys.extend([front_poly, split_poly]);
+                } else {
+                    front_poly_indices.push(front_poly_indices.len());
+                    polys.push(front_poly);
+                }
+
+                if back_poly.vertices.len() >= FPOLY_VERTEX_THRESHOLD {
+                    let split_poly = back_poly.split_in_half().unwrap();
+                    back_poly_indices.extend([back_poly_indices.len(), back_poly_indices.len() + 1]);
+                    polys.extend([back_poly, split_poly]);
+                } else {
+                    back_poly_indices.push(back_poly_indices.len());
+                    polys.push(back_poly);
+                }
+            }
+        }
+    }
+
+    if !front_poly_indices.is_empty() {
+        split_poly_list(model, Some(our_node_index), ENodePlace::Front, polys, &front_poly_indices, optimization, balance, portal_bias, rebuild_simple_polys);
+    }
+
+    if !back_poly_indices.is_empty() {
+        split_poly_list(model, Some(our_node_index), ENodePlace::Back, polys, &back_poly_indices, optimization, balance, portal_bias, rebuild_simple_polys);
+    }
+
+}
+
+pub fn find_best_split(polys: &[FPoly], optimization: EBspOptimization, balance: u8, portal_bias: u8) -> Option<usize> {
+    let poly_indices = (0..polys.len()).collect::<Vec<usize>>();
+    find_best_split_recursive(polys, &poly_indices, optimization, balance, portal_bias)
+}
+
+fn find_best_split_recursive(polys: &[FPoly], poly_indices: &[usize], optimization: EBspOptimization, balance: u8, portal_bias: u8) -> Option<usize> {
     let portal_bias = portal_bias as f32 / 100.0;
+
+	// No need to test if only one poly.
+    if poly_indices.len() == 1 {
+        return Some(0usize)
+    }
 
     let step = match optimization {
         EBspOptimization::Optimal => 1,
@@ -1026,48 +1131,48 @@ fn find_best_split(polys: &[FPoly], optimization: EBspOptimization, balance: u8,
     };
 
     // See if there are any non-semisolid polygons here.
-    let all_semi_solids = polys.iter().all(|poly| !poly.poly_flags.contains(EPolyFlags::AddLast));
+    let all_semi_solids = polys.iter().all(|poly| poly.poly_flags.contains(EPolyFlags::NoAddToBSP));
 
 	// Search through all polygons in the pool and find:
 	// A. The number of splits each poly would make.
 	// B. The number of front and back nodes the polygon would create.
 	// C. Number of coplanars.
+    let mut best_poly_index: Option<usize> = None;
     let mut best_score = 0.0f32;
 
     // Iterate over the polys with the given step.
-    for i in (0..polys.len()).step_by(step) {
+    for i in (0..poly_indices.len()).step_by(step) {
+        let mut poly_index = poly_indices[i];
+
+        if !all_semi_solids {
+            loop {
+                if poly_index >= (i + step) || 
+                   poly_index >= polys.len() || 
+                   !polys[poly_index].poly_flags.contains(EPolyFlags::NoAddToBSP) ||
+                   polys[poly_index].poly_flags.contains(EPolyFlags::Portal)
+                {
+                    break
+                }
+                
+                poly_index += 1;
+            }
+        }
+
+        if poly_index >= (i + step) || poly_index >= polys.len() {
+            continue;
+        }
+
+        let poly = &polys[poly_index];
         let mut splits = 0;
         let mut front = 0;
         let mut back = 0;
         let mut coplanars = 0;
-        let poly = &polys[i];
 
-        let mut poly_index = 0usize;
-
-        // Find the next poly that is not semisolid or is a portal.
-        // This is very confusing. Come back when not sleepy.
-        /*
-        do
-		{
-			Index++;
-			Poly = PolyList[Index];
-		} while(
-			Index < (i + Inc) && 
-			Index < NumPolys && 
-			((Poly->PolyFlags & PF_AddLast) && !(Poly->PolyFlags & PF_Portal)) &&
-			!AllSemiSolids );
-         */
-
-        if poly_index >= i + step || poly_index >= polys.len() {
-            continue;
-        }
-
-        for j in 0..polys.len() {
-            let other_poly = &polys[j];
+        for j in 0..poly_indices.len() {
+            let other_poly = &polys[poly_indices[j]];
             if i == j {
                 continue;
             }
-
             match other_poly.split_with_plane_fast(&poly.vertices[0], &poly.normal) {
                 ESplitType::Coplanar => {
                     coplanars += 1;
@@ -1111,6 +1216,8 @@ fn find_best_split(polys: &[FPoly], optimization: EBspOptimization, balance: u8,
                 score
             };
 
+            println!("score: {}", score);
+
             if score < best_score || best_poly_index.is_none() {
                 best_poly_index = Some(poly_index);
                 best_score = score;
@@ -1118,5 +1225,5 @@ fn find_best_split(polys: &[FPoly], optimization: EBspOptimization, balance: u8,
         }
     }
 
-    None
+    best_poly_index
 }

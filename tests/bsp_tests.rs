@@ -1,6 +1,6 @@
 use bdk_rs::coords::FModelCoords;
 use bdk_rs::math::FVector;
-use bdk_rs::bsp::{merge_coplanars, try_to_merge, bsp_add_node};
+use bdk_rs::bsp::{EBspOptimization, merge_coplanars, try_to_merge, bsp_add_node, find_best_split};
 use bdk_rs::fpoly::{self, FPoly};
 use bdk_rs::model::{self, EBspNodeFlags, UModel};
 
@@ -173,6 +173,60 @@ fn merge_coplanars_quad_grid_with_skipped_index_test() {
     assert_eq!(merged_polys[2].vertices.to_vec(), polys[3].vertices.to_vec());
 }
 
+#[test]
+fn find_best_split_single_poly_test() {
+    // 
+    let polys = vec![
+        FPoly::from_vertices(&vec![
+            FVector::new(0.0, 0.0, 0.0),
+            FVector::new(0.0, 1.0, 0.0),
+            FVector::new(1.0, 1.0, 0.0),
+            FVector::new(1.0, 0.0, 0.0),
+        ])
+    ];
+
+    // Act
+    let split_index = find_best_split(&polys,  EBspOptimization::Optimal, 50, 50);
+
+    // Assert
+    assert_eq!(split_index, Some(0));
+}
+
+#[test]
+fn find_best_split_all_semisolids_test() {
+}
+
+#[test]
+fn find_best_split_test() {
+    // Arrange
+    // Stack 3 identical polygons with 1 unit of difference between them along Z.
+    let polys = vec![
+        FPoly::from_vertices(&[
+            FVector::new(0.0, 0.0, 0.0),
+            FVector::new(0.0, 1.0, 0.0),
+            FVector::new(1.0, 1.0, 0.0),
+            FVector::new(1.0, 0.0, 0.0)]),
+        FPoly::from_vertices(&[
+            FVector::new(0.0, 0.0, 1.0),
+            FVector::new(0.0, 1.0, 1.0),
+            FVector::new(1.0, 1.0, 1.0),
+            FVector::new(1.0, 0.0, 1.0)]),
+        FPoly::from_vertices(&[
+            FVector::new(0.0, 0.0, 2.0),
+            FVector::new(0.0, 1.0, 2.0),
+            FVector::new(1.0, 1.0, 2.0),
+            FVector::new(1.0, 0.0, 2.0)]),
+    ];
+
+    // Act
+    let split_index = find_best_split(&polys, EBspOptimization::Optimal, 50, 50);
+
+    // Assert
+    // The middle polygon should be the best split polygon because it
+    // has one polygon behind it and one polygon in front of it.
+    assert_eq!(split_index, Some(1))
+}
+
 
 #[test]
 fn bsp_add_node_root_node() {
@@ -190,5 +244,4 @@ fn bsp_add_node_root_node() {
     );
 
     println!("{:?}", model.nodes);
-
 }
