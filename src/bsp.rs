@@ -419,21 +419,7 @@ struct RebuildContext {
     g_errors: usize,
 }
 
-fn add_brush_to_world(model: &mut UModel, node_index: usize, ed_poly: &mut FPoly, filter: EPolyNodeFilter, node_place: ENodePlace) {
-    match filter {
-        EPolyNodeFilter::Outside | EPolyNodeFilter::CoplanarOutside => {
-            bsp_add_node(model, node_index, node_place, EBspNodeFlags::IsNew, ed_poly);
-        }
-        EPolyNodeFilter::CospatialFacingOut => {
-            if !ed_poly.poly_flags.contains(EPolyFlags::Semisolid) {
-                bsp_add_node(model, node_index, node_place, EBspNodeFlags::IsNew, ed_poly);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn add_world_to_brush(context: &mut RebuildContext, model: &mut UModel, node_index: usize, ed_poly: &mut FPoly, filter: EPolyNodeFilter, _: ENodePlace) {
+fn add_world_to_brush_func(context: &mut RebuildContext, model: &mut UModel, node_index: usize, ed_poly: &mut FPoly, filter: EPolyNodeFilter, _: ENodePlace) {
     // Get a mutable refernce from the Rc<UModel> and add the node.
     let g_model = Rc::get_mut(&mut context.g_model).unwrap();
     match filter {
@@ -452,6 +438,40 @@ fn add_world_to_brush(context: &mut RebuildContext, model: &mut UModel, node_ind
         }
     }
 }
+
+fn subtract_world_to_brush_func(context: &mut RebuildContext, model: &mut UModel, node_index: usize, ed_poly: &mut FPoly, filter: EPolyNodeFilter, _: ENodePlace) {
+    match filter {
+        EPolyNodeFilter::Outside | EPolyNodeFilter::CoplanarOutside | EPolyNodeFilter::CospatialFacingIn => {
+			// Only affect the world poly if it has been cut.
+            if ed_poly.poly_flags.contains(EPolyFlags::EdCut) {
+                bsp_add_node(model, context.g_last_coplanar.unwrap(), ENodePlace::Plane, EBspNodeFlags::IsNew, ed_poly);
+            }
+        }
+        EPolyNodeFilter::Inside | EPolyNodeFilter::CoplanarInside | EPolyNodeFilter::CospatialFacingOut => {
+			// Discard original poly.
+            context.g_discarded += 1;
+            if context.g_model.nodes[context.g_node].vertex_count > 0 {
+                context.g_model.nodes[context.g_node].vertex_count = 0;
+            }
+        }
+    }
+}
+
+fn intersect_world_with_brush_func(context: &mut RebuildContext, model: &mut UModel, node_index: usize, ed_poly: &mut FPoly, filter: EPolyNodeFilter, _: ENodePlace) {
+    match filter {
+        EPolyNodeFilter::Outside | EPolyNodeFilter::CoplanarOutside | EPolyNodeFilter::CospatialFacingIn => {
+            // Ignore.
+
+        }
+        EPolyNodeFilter::Inside | EPolyNodeFilter::CoplanarInside | EPolyNodeFilter::CospatialFacingOut => {
+            if ed_poly.fix() >= 3 {
+                context.g_model.polys.push(ed_poly.clone());
+            }
+        }
+    }
+}
+
+
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ECsgOper {
@@ -490,7 +510,6 @@ fn bsp_filter_fpoly(filter_func: BspFilterFunc, model: &mut UModel, ed_poly: &mu
     let starting_coplanar_info = FCoplanarInfo::default();
      if model.nodes.is_empty() {
         // If Bsp is empty, process at root.
-        // model.is_root_outside ? EPolyNodeFilter::Outside : EPolyNodeFilter::Inside
         let filter = if model.is_root_outside { EPolyNodeFilter::Outside } else { EPolyNodeFilter::Inside };
         filter_func(model, 0, ed_poly, filter, ENodePlace::Root);
      } else {
@@ -816,7 +835,7 @@ fn bsp_merge_coplanars(model: &mut UModel, should_remap_links: bool, should_merg
 }
 
 /// Perform any CSG operation between the brush and the world.
-pub fn bsp_brush_csg(actor: &mut Rc<RefCell<ABrush>>, model: &mut UModel, poly_flags: EPolyFlags, csg_operation: ECsgOper, should_build_bounds: bool, should_merge_polys: bool) {
+pub fn bsp_brush_csg(actor_id: usize, model: &mut UModel, poly_flags: EPolyFlags, csg_operation: ECsgOper, should_build_bounds: bool, should_merge_polys: bool) {
     // Non-solid and semisolid stuff can only be added.
     let not_poly_flags = match csg_operation {
         ECsgOper::Add => EPolyFlags::Semisolid | EPolyFlags::NotSolid,
@@ -1143,9 +1162,118 @@ fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: u8, po
     print!("bspBuild built {} convex polys into {} nodes", original_polys, model.nodes.len());
 }
 
+/// Convert a Bsp node to an EdPoly.  Returns number of vertices in Bsp
+/// node (0 or 3-MAX_NODE_VERTICES).
+fn bsp_node_to_fpoly(model: &UModel, node_index: usize) -> Option<FPoly> {
+    let node = &model.nodes[node_index];
+    let poly = model.surfaces[node.surface_index];
+    let vert_pool = &model.vertices[node.vertex_pool_index..node.vertex_pool_index + node.vertex_count];
+
+    if vert_pool.len() < 3 {
+        return None;
+    }
+
+    let mut ed_poly = FPoly::new();
+
+    ed_poly.base = model.points[poly.base_point_index];
+    ed_poly.normal = model.vectors[poly.normal_index];
+    ed_poly.poly_flags = poly.poly_flags & !(EPolyFlags::EdCut | EPolyFlags::EdProcessed | EPolyFlags::Selected | EPolyFlags::Memorized);
+    ed_poly.link = Some(node.surface_index);
+    // ed_poly.material = poly.material;
+    // ed_poly.actor = Some(poly.actor.clone());
+    ed_poly.brush_poly_index = poly.brush_polygon_index;
+
+    // ed_poly.item_name = if let Some(master_ed_poly) = poly_find_master(model, node.surface_index) {
+    //     master_ed_poly.item_name.clone()
+    // } else {
+    //     None
+    // };
+
+    ed_poly.texture_u = model.vectors[poly.texture_u_index];
+    ed_poly.texture_v = model.vectors[poly.texture_v_index];
+    ed_poly.light_map_scale = poly.light_map_scale;
+
+    ed_poly.vertices = vert_pool.iter().map(|vertex| model.points[vertex.vertex_index]).collect();
+
+    ed_poly.remove_colinears();
+
+    Some(ed_poly)
+}
+
 /// Filter all relevant world polys through the brush.
-fn filter_world_through_brush(model: &mut UModel, brush: &mut UModel, csg_operation: ECsgOper, node_index: usize, bounding_sphere: &FSphere) {
-    !todo!()
+fn filter_world_through_brush(model: &mut UModel, brush: &mut UModel, csg_operation: ECsgOper, mut node_index: usize, brush_sphere: &FSphere) {
+    loop {
+        let node = &model.nodes[node_index];
+        
+        // Get the surface.
+        let surface_index = node.surface_index;
+
+        // Skip new nodes and their children, which are guaranteed new.
+        if node.node_flags.contains(EBspNodeFlags::IsNew) {
+            return;
+        }
+
+        // Sphere reject.
+        let distance = node.plane.plane_dot(brush_sphere.origin);
+        let (do_front, do_back) = {
+            let distance = node.plane.plane_dot(brush_sphere.origin);
+            (distance >= -brush_sphere.radius, distance <= brush_sphere.radius)
+        };
+
+		// Process only polys that aren't empty.
+        if do_front && do_back {
+            if let Some(mut temp_ed_poly) = bsp_node_to_fpoly(model, node_index) {
+                let surface = &model.surfaces[surface_index];
+                // temp_ed_poly.actor = surface.actor;
+                temp_ed_poly.brush_poly_index = surface.brush_polygon_index;
+
+                let filter_func = match csg_operation {
+                    ECsgOper::Add => add_world_to_brush_func,
+                    ECsgOper::Subtract => subtract_world_to_brush_func,
+                    ECsgOper::Intersect => intersect_world_with_brush_func,
+                    ECsgOper::Deintersect => deintersect_world_with_brush_func,
+                };
+
+                match csg_operation {
+                    ECsgOper::Add | ECsgOper::Subtract => {
+				        // Add and subtract work the same in this step.
+                        // GNode       = iNode;
+                        // GModel  	= Model;
+                        // GDiscarded  = 0;
+                        // GNumNodes	= Model->Nodes.Num();
+
+                        // // Find last coplanar in chain.
+                        // GLastCoplanar = iNode;
+                        // while( Model->Nodes(GLastCoplanar).iPlane != INDEX_NONE )
+                        //     GLastCoplanar = Model->Nodes(GLastCoplanar).iPlane;
+
+				        // Do the filter operation.
+                        bsp_filter_fpoly(filter_func, brush, &mut temp_ed_poly);
+
+                        // if( GDiscarded == 0 )
+                        // {
+                        //     // Get rid of all the fragments we added.
+                        //     Model->Nodes(GLastCoplanar).iPlane = INDEX_NONE;
+                        //     Model->Nodes.Remove( GNumNodes, Model->Nodes.Num()-GNumNodes );
+                        // }
+                        // else
+                        // {
+                        //     // Tag original world poly for deletion; has been deleted or replaced by partial fragments.
+                        //     if( GModel->Nodes(GNode).NumVertices )
+                        //     {
+                        //         GModel->Nodes.ModifyItem( GNode );
+                        //         GModel->Nodes(GNode).NumVertices = 0;
+                        //     }
+                        // }
+                    }
+                    ECsgOper::Intersect | ECsgOper::Deintersect => {
+                        bsp_filter_fpoly(filter_func, brush, &mut temp_ed_poly)
+                    }
+                }
+            
+            }
+        }
+    }
 }
 
 
