@@ -816,7 +816,7 @@ fn bsp_merge_coplanars(model: &mut UModel, should_remap_links: bool, should_merg
 }
 
 /// Perform any CSG operation between the brush and the world.
-fn bsp_brush_csg(actor: &mut Rc<RefCell<ABrush>>, model: &mut UModel, poly_flags: EPolyFlags, csg_operation: ECsgOper, should_build_bounds: bool, should_merge_polys: bool) {
+pub fn bsp_brush_csg(actor: &mut Rc<RefCell<ABrush>>, model: &mut UModel, poly_flags: EPolyFlags, csg_operation: ECsgOper, should_build_bounds: bool, should_merge_polys: bool) {
     // Non-solid and semisolid stuff can only be added.
     let not_poly_flags = match csg_operation {
         ECsgOper::Add => EPolyFlags::Semisolid | EPolyFlags::NotSolid,
@@ -984,7 +984,7 @@ fn bsp_brush_csg(actor: &mut Rc<RefCell<ABrush>>, model: &mut UModel, poly_flags
 
     // Merge coplanars if needed.
     match csg_operation {
-        ECsgOper::Add | ECsgOper::Subtract => {
+        ECsgOper::Intersect | ECsgOper::Deintersect => {
             if should_merge_polys {
                 bsp_merge_coplanars(brush, true, false);
             }

@@ -1,6 +1,6 @@
 use bdk_py::math::FVector;
-use bdk_py::bsp::{EBspOptimization, ENodePlace, merge_coplanars, try_to_merge, bsp_add_node, find_best_split};
-use bdk_py::fpoly::FPoly;
+use bdk_py::bsp::{EBspOptimization, ENodePlace, merge_coplanars, try_to_merge, bsp_add_node, find_best_split, bsp_brush_csg};
+use bdk_py::fpoly::{EPolyFlags, FPoly};
 use bdk_py::model::{EBspNodeFlags, UModel};
 
 #[test]
@@ -246,5 +246,15 @@ fn bsp_add_node_root_node() {
 }
 
 // #[test]
-// fn bsp_brush_csg() {
-// }
+fn bsp_brush_csg_subtract_test() {
+    // Arrange
+    let polys = create_unit_cube_polys();
+    let mut model = UModel::new();
+
+    // Act
+    bsp_brush_csg(None, &mut model, EPolyFlags::empty(), bdk_py::bsp::ECsgOper::Subtract, true, true);
+
+    // We should end up with a model that has a single box with all the faces pointing inwards.
+    assert_eq!(model.nodes.len(), 1);
+    assert_eq!(model.polys.len(), 6);
+}
