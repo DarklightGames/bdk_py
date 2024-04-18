@@ -1,14 +1,16 @@
+use crate::bsp::ECsgOper;
+use crate::fpoly::EPolyFlags;
 use crate::model::UModel;
 use crate::math::FVector;
 use crate::coords::{FCoords, FModelCoords};
-use std::rc::Rc;
-use std::cell::RefCell;
 
 #[derive(Debug, PartialEq)]
 pub struct ABrush {
-    pub model: Rc<RefCell<UModel>>,
+    pub model: UModel,
     pub location: FVector,
     pub pre_pivot: FVector,
+    pub poly_flags: EPolyFlags,
+    pub csg_operation: ECsgOper,
 }
 
 impl ABrush {

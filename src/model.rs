@@ -52,16 +52,23 @@ bitflags! {
 /// same plane may reference the same poly.
 #[derive(Debug, PartialEq)]
 pub struct FBspSurf {
-    //pub material: Rc<UMaterial>,
+    /// Polygon flags.
     pub poly_flags: EPolyFlags,
+    /// Polygon & texture base point index (where U,V==0,0).
     pub base_point_index: usize,
+    /// Index to polygon normal.
     pub normal_index: usize,
+    /// Texture U-vector index.
     pub texture_u_index: usize,
+    /// Texture V-vector index.
     pub texture_v_index: usize,
+    /// Editor brush polygon index.
     pub brush_polygon_index: Option<usize>,
-    //pub actor: Rc<ABrush>,
-    pub node_indices: Vec<usize>,   // TODO: what's this one??
+    /// Nodes which make up this surface
+    pub node_indices: Vec<usize>,
+    /// The plane this surface lies on.
     pub plane: FPlane,
+    /// The number of units/lightmap texel on this surface.
     pub light_map_scale: f32
 }
 
@@ -99,7 +106,7 @@ pub const BSP_NODE_MAX_ZONES: usize = 64;
 /// If iPlane==INDEX_NONE, a node has no coplanars.  Otherwise iPlane
 /// is an index to a coplanar polygon in the Bsp.  All polygons that are iPlane
 /// children can only have iPlane children themselves, not fronts or backs.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FBspNode {
     /// Plane the node falls into (X, Y, Z, W).
     pub plane: FPlane,
@@ -134,8 +141,11 @@ pub struct FBspNode {
     /// Leaf in back and front, INDEX_NONE = NOT A LEAF.
     pub leaf_indices: [Option<usize>;2],
 
+    /// Index into array of sections.
     pub section_index: Option<usize>,
+    /// The first vertex in the section which this node uses.
     pub first_vertex_index: usize,
+    /// The lightmap that this node uses.
     pub light_map_index: Option<usize>,
 }
 
@@ -181,7 +191,9 @@ impl FBspNode {
 /// other sides in the level which are cospatial with this side.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FVert {
+    /// Index of vertex.
     pub vertex_index: usize,
+    /// If shared, index of unique side. Otherwise INDEX_NONE.
     pub side_index: Option<usize>,
 }
 
@@ -216,24 +228,33 @@ pub struct FZoneProperties {
 
 #[derive(Debug, PartialEq)]
 pub struct UModel {
+    pub polys: Vec<FPoly>,
+
+    // BSP data.
     pub vertices: Vec<FVert>,
     pub points: Vec<FVector>,
     pub vectors: Vec<FVector>,
     pub nodes: Vec<FBspNode>,
     pub surfaces: Vec<FBspSurf>,
-    pub polys: Vec<FPoly>,
     pub bounds: Vec<FBox>,
     pub leaf_hulls: Vec<usize>,
     pub leaves: Vec<FLeaf>,
     pub zones: Vec<FZoneProperties>,
     pub bounding_sphere: FSphere,
     pub bounding_box: FBox,
-
     pub linked: bool,
     pub is_root_outside: bool,
 }
 
 impl UModel {
+    pub fn new_from_polys(polys: &[FPoly]) -> UModel {
+        let mut model = UModel::new();
+        for poly in polys {
+            model.polys.push(poly.clone());
+        }
+        model
+    }
+
     pub fn new() -> UModel {
         UModel {
             vertices: Vec::new(),
@@ -249,7 +270,7 @@ impl UModel {
             bounding_sphere: FSphere::default(),
             bounding_box: FBox::default(),
             linked: false,
-            is_root_outside: true
+            is_root_outside: true,  // TODO: what even is this?
         }
     }
 
@@ -335,8 +356,8 @@ impl UModel {
 
     fn find_nearest_vertex_recursive(&self, source_point: FVector, dest_point: &mut FVector, mut min_radius: f32, node_index: Option<usize>, vertex_index: &mut usize) -> f32 {
         let mut result_radius = -1.0f32;
-
         let mut next_node_index = node_index;
+
         while let Some(node_index) = next_node_index {
             let node = &self.nodes[node_index];
             let back_index = node.back_node_index;
@@ -410,8 +431,8 @@ impl UModel {
             // Found an existing point.
             vertex_index
         } else {
-            let fast_rebuild = false;
-            add_thing(&mut self.points, v, thresh, fast_rebuild)
+            // No match found; add it slowly to find duplicates.
+            add_thing(&mut self.points, v, thresh, false)
         }
     }
 

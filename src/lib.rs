@@ -8,6 +8,7 @@ pub mod box_;
 pub mod sphere;
 pub mod coords;
 pub mod brush;
+pub mod csg;
 
 use pyo3::prelude::*;
 use crate::fpoly::FPoly;

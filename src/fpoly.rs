@@ -167,7 +167,7 @@ impl FPoly {
     pub fn from_vertices(vertices: &[FVector]) -> Self {
         let mut fpoly = FPoly::new();
         _ = fpoly.vertices.try_extend_from_slice(vertices);
-        // fpoly.base = fpoly.vertices[0];  // TODO: the selection of the base vertex seems arbitrary.
+        // fpoly.base = fpoly.vertices[0];  // TODO: the selection of the base vertex seems arbitrary
         _ = fpoly.calc_normal();
         fpoly
     }
@@ -200,6 +200,12 @@ impl FPoly {
     pub fn reverse(&mut self) {
         self.normal *= -1.0;
         self.vertices.reverse()
+    }
+
+    pub fn reversed(&self) -> FPoly {
+        let mut fpoly = self.clone();
+        fpoly.reverse();
+        fpoly
     }
 
     /// Fix up an editor poly by deleting vertices that are identical. Sets
