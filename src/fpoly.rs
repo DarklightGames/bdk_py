@@ -190,7 +190,7 @@ impl FPoly {
             vertices: Default::default(),
             poly_flags: EPolyFlags::from_bits_retain(0),
             actor: None,
-            link: None,
+            link: Some(0),
             brush_poly_index: None,
             save_poly_index: None,
             save_normal: FVector { x: 0.0, y: 0.0, z: 0.0 },

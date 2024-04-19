@@ -235,37 +235,30 @@ pub fn bsp_add_node(model: &mut UModel, mut parent_node_index: Option<usize>, no
     }
     
     // TODO: this is actually the NONE case, we set the link to None when we want it inserted at the end.
-    let (surface, surface_index) = match ed_poly.link {
-        None => {
-            let mut surf = FBspSurf::default();
+    let (surface, surface_index) = if ed_poly.link == Some(model.surfaces.len()) {
+        let mut surf = FBspSurf::default();
 
-            // This node has a new polygon being added by bspBrushCSG; must set its properties here.
-            surf.base_point_index = model.bsp_add_point(ed_poly.base, true);
-            surf.normal_index = model.bsp_add_vector(ed_poly.normal, true);
-            surf.texture_u_index = model.bsp_add_vector(ed_poly.texture_u, false);
-            surf.texture_v_index = model.bsp_add_vector(ed_poly.texture_v, false);
-            // Surf->Material = EdPoly->Material;
-            // Surf->Actor = EdPoly->Actor;
-            surf.poly_flags = ed_poly.poly_flags & !EPolyFlags::NoAddToBSP;
-            surf.light_map_scale = ed_poly.light_map_scale;
-            surf.brush_polygon_index = ed_poly.brush_poly_index;
-            surf.plane = FPlane::new_from_origin_and_normal(ed_poly.vertices.first().unwrap(), &ed_poly.normal);
-            
-            let surface_index = model.surfaces.len();
-            model.surfaces.push(surf);
+        // This node has a new polygon being added by bspBrushCSG; must set its properties here.
+        surf.base_point_index = model.bsp_add_point(ed_poly.base, true);
+        surf.normal_index = model.bsp_add_vector(ed_poly.normal, true);
+        surf.texture_u_index = model.bsp_add_vector(ed_poly.texture_u, false);
+        surf.texture_v_index = model.bsp_add_vector(ed_poly.texture_v, false);
+        // Surf->Material = EdPoly->Material;
+        // Surf->Actor = EdPoly->Actor;
+        surf.poly_flags = ed_poly.poly_flags & !EPolyFlags::NoAddToBSP;
+        surf.light_map_scale = ed_poly.light_map_scale;
+        surf.brush_polygon_index = ed_poly.brush_poly_index;
+        surf.plane = FPlane::new_from_origin_and_normal(ed_poly.vertices.first().unwrap(), &ed_poly.normal);
+        
+        let surface_index = model.surfaces.len();
+        model.surfaces.push(surf);
 
-            // BDK: The current scheme is busted because it's assumed that the incoming ed_poly is immutable.
-            //      This is why I suppose it's preferable to have the link set before calling this function.
-            //ed_poly.link = Some(surface_index);
-            (&model.surfaces[surface_index], surface_index)
-        }
-        Some(link) => {
-            // TODO: is this because we're setting the link to 0 by default?
-            println!("link: {}", link);
-            println!("model.surfaces.len(): {}", model.surfaces.len());
-            assert!(link < model.surfaces.len());
-            (&model.surfaces[link], link)
-        }
+        (&model.surfaces[surface_index], surface_index)
+    } else {
+        assert!(ed_poly.link.is_some());
+        let link  = ed_poly.link.unwrap();
+        assert!(link < model.surfaces.len());
+        (&model.surfaces[link], link)
     };
 
 	// Set NodeFlags.
@@ -526,9 +519,6 @@ fn filter_ed_poly(filter_func: BspFilterFunc, model: &mut UModel, mut node_index
         // Process split results.
         let split_result = ed_poly.split_with_plane(plane_base, plane_normal, false);
 
-        println!("Node Base: {:?}, Node Normal: {:?}", plane_base, plane_normal);
-        println!("split_result: {:?}", split_result);
-
         match split_result {
             ESplitType::Front => {
                 do_front = true;
@@ -670,7 +660,6 @@ fn filter_ed_poly(filter_func: BspFilterFunc, model: &mut UModel, mut node_index
 }
 
 fn add_brush_to_world_func(model: &mut UModel, node_index: usize, ed_poly: &FPoly, filter: EPolyNodeFilter, node_place: ENodePlace) {
-    println!("add_brush_to_world_func, filter: {:?}", filter);
     match filter {
         EPolyNodeFilter::Outside | EPolyNodeFilter::CoplanarOutside => {
             bsp_add_node(model, Some(node_index), node_place, EBspNodeFlags::IsNew, ed_poly);
@@ -859,8 +848,6 @@ pub fn bsp_brush_csg(
 
         // Transform it.
         dest_ed_poly.transform(&coords, &pre_pivot, &location, orientation);
-
-        // println!("Brush poly {:?}", dest_ed_poly);
 
         // Add poly to the temp model.
         temp_model.polys.push(dest_ed_poly);
@@ -1195,11 +1182,6 @@ fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: u8, po
             }
         }
 
-        // TODO: print out the ed poly links
-        for poly in polys.iter() {
-            println!("Poly link: {:?}", poly.link);
-        }
-
         split_poly_list(model, None, ENodePlace::Root, &poly_indices, optimization, balance, portal_bias, rebuild_simple_polys);
 
         // Now build the bounding boxes for all nodes.
@@ -1212,7 +1194,7 @@ fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: u8, po
         }
     }
 
-    print!("bspBuild built {} convex polys into {} nodes", original_polys, model.nodes.len());
+    println!("bspBuild built {} convex polys into {} nodes", original_polys, model.nodes.len());
 }
 
 /// Pick a splitter poly then split a pool of polygons into front and back polygons and
@@ -1223,7 +1205,7 @@ fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: u8, po
 pub fn split_poly_list(
     model: &mut UModel, 
     parent_node_index: Option<usize>, 
-    node_place: ENodePlace, 
+    node_place: ENodePlace,
     poly_indices: &[usize],
     optimization: EBspOptimization, 
     balance: u8, 
@@ -1235,15 +1217,14 @@ pub fn split_poly_list(
 
     let mut front_poly_indices = Vec::with_capacity(num_polys_to_alloc);
     let mut back_poly_indices = Vec::with_capacity(num_polys_to_alloc);
-    let split_poly_index = find_best_split_recursive(&model.polys, poly_indices, optimization, balance, portal_bias);
 
-    println!("split_poly_index: {:?}", split_poly_index);
+    let split_poly_index = find_best_split_with_indices(&model.polys, poly_indices, optimization, balance, portal_bias);
 
 	// Add the splitter poly to the Bsp with either a new BspSurf or an existing one.
     if rebuild_simple_polys {
         if let Some(split_poly_index) = split_poly_index {
             let split_poly = &mut model.polys[split_poly_index];
-            split_poly.link = None
+            split_poly.link = Some(model.surfaces.len());
         }
     }
 
@@ -1318,15 +1299,16 @@ pub fn split_poly_list(
 
 pub fn find_best_split(polys: &[FPoly], optimization: EBspOptimization, balance: u8, portal_bias: u8) -> Option<usize> {
     let poly_indices = (0..polys.len()).collect::<Vec<usize>>();
-    find_best_split_recursive(polys, &poly_indices, optimization, balance, portal_bias)
+
+    find_best_split_with_indices(polys, &poly_indices, optimization, balance, portal_bias)
 }
 
-fn find_best_split_recursive(polys: &[FPoly], poly_indices: &[usize], optimization: EBspOptimization, balance: u8, portal_bias: u8) -> Option<usize> {
+fn find_best_split_with_indices(polys: &[FPoly], poly_indices: &[usize], optimization: EBspOptimization, balance: u8, portal_bias: u8) -> Option<usize> {
     let portal_bias = portal_bias as f32 / 100.0;
 
 	// No need to test if only one poly.
     if poly_indices.len() == 1 {
-        return Some(0usize)
+        return Some(poly_indices[0]);
     }
 
     let step = match optimization {
@@ -1345,38 +1327,42 @@ fn find_best_split_recursive(polys: &[FPoly], poly_indices: &[usize], optimizati
     let mut best_poly_index: Option<usize> = None;
     let mut best_score = 0.0f32;
 
+    // BDK: how is it possible to get a None out of this if there is at least one poly?
+
     // Iterate over the polys with the given step.
     for i in (0..poly_indices.len()).step_by(step) {
-        let mut poly_index = poly_indices[i];
+        // TODO: it's a little dicey here bnecause we split the poly and indices up.
+        let mut index = i;
 
         if !all_semi_solids {
+            // BDK: Find the next non-semi-solid poly.
             loop {
-                if poly_index >= (i + step) || 
-                   poly_index >= polys.len() || 
-                   !polys[poly_index].poly_flags.contains(EPolyFlags::NoAddToBSP) ||
-                   polys[poly_index].poly_flags.contains(EPolyFlags::Portal)
+                if index >= (i + step) || 
+                    index >= polys.len() || 
+                   !polys[poly_indices[index]].poly_flags.contains(EPolyFlags::AddLast) ||
+                   polys[poly_indices[index]].poly_flags.contains(EPolyFlags::Portal)
                 {
-                    break
+                    break;
                 }
                 
-                poly_index += 1;
+                index += 1;
             }
         }
 
-        if poly_index >= (i + step) || poly_index >= polys.len() {
+        if index >= (i + step) || index >= poly_indices.len() {
             continue;
         }
 
-        let poly = &polys[poly_index];
+        let poly = &polys[poly_indices[index]];
         let mut splits = 0;
         let mut front = 0;
         let mut back = 0;
 
         for j in 0..poly_indices.len() {
-            let other_poly = &polys[poly_indices[j]];
             if i == j {
                 continue;
             }
+            let other_poly = &polys[poly_indices[j]];
             match other_poly.split_with_plane_fast(&poly.vertices[0], &poly.normal) {
                 ESplitType::Front => {
                     front += 1;
@@ -1419,7 +1405,7 @@ fn find_best_split_recursive(polys: &[FPoly], poly_indices: &[usize], optimizati
             };
 
             if score < best_score || best_poly_index.is_none() {
-                best_poly_index = Some(poly_index);
+                best_poly_index = Some(poly_indices[index]);
                 best_score = score;
             }
         }

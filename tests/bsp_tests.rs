@@ -180,7 +180,6 @@ fn merge_coplanars_quad_grid_with_skipped_index_test() {
     // Assert
     assert_eq!(merge_count, 1);
     let merged_polys = polys.iter().filter(|p| p.vertices.len() > 0).collect::<Vec<&FPoly>>();
-    println!("{:?}", merged_polys.iter().map(|f| f.vertices.to_vec()).collect::<Vec<Vec<FVector>>>());
     assert_eq!(merged_polys.len(), 3);
     assert_eq!(merged_polys[0].vertices.to_vec(), vec![
         FVector::new(0.0, 1.0, 0.0),
@@ -254,7 +253,6 @@ fn bsp_add_node_root_node() {
         FVector::new(1.0, 0.0, 0.0),
         FVector::new(1.0, 1.0, 0.0),
     ]);
-    poly.link = None;
 
     bsp_add_node(&mut model, 
         None, 
