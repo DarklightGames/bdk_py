@@ -1,6 +1,8 @@
+use std::io::Write;
+
 use bdk_py::brush::ABrush;
 use bdk_py::math::FVector;
-use bdk_py::bsp::{EBspOptimization, ENodePlace, merge_coplanars, try_to_merge, bsp_add_node, find_best_split, bsp_brush_csg, bsp_validate_brush};
+use bdk_py::bsp::{bsp_add_node, bsp_brush_csg, bsp_filter_fpoly, bsp_validate_brush, find_best_split, merge_coplanars, try_to_merge, EBspOptimization, ENodePlace};
 use bdk_py::fpoly::{EPolyFlags, FPoly};
 use bdk_py::model::{EBspNodeFlags, UModel};
 
@@ -252,10 +254,10 @@ fn bsp_add_node_root_node() {
         FVector::new(1.0, 0.0, 0.0),
         FVector::new(1.0, 1.0, 0.0),
     ]);
-    poly.link = Some(0);    // TODO: this sucks. should we default it to 0?
+    poly.link = None;
 
     bsp_add_node(&mut model, 
-        0, 
+        None, 
         ENodePlace::Root, 
         EBspNodeFlags::empty(),
         &poly
@@ -264,21 +266,26 @@ fn bsp_add_node_root_node() {
     assert!(model.nodes.len() == 1); 
 }
 
-fn output_obj(model: &UModel) {
+fn output_obj(model: &UModel, path: &str) {
     // Output the surfaces to an OBJ file for debugging.
-    for point in &model.points {
-        println!("v {} {} {}", point.x, point.y, point.z);
-    }
-
-    for node in &model.nodes {
-        if node.vertex_count == 0 {
-            continue;
+    if let Ok(mut obj) = std::fs::File::create(path) {
+        for point in &model.points {
+            obj.write(format!("v {} {} {}\n", point.x, point.y, point.z).as_bytes());
         }
-
-        let vertices = &model.vertices[node.vertex_pool_index..node.vertex_pool_index + node.vertex_count];
-        let point_indices = vertices.iter().map(|vertex| vertex.vertex_index).collect::<Vec<usize>>();
-        let face_indices = &point_indices.iter().map(|i| (i + 1).to_string()).collect::<Vec<String>>().join(" ");
-        println!("f {}", face_indices);
+    
+        for node in &model.nodes {
+            if node.vertex_count == 0 {
+                continue;
+            }
+    
+            let vertices = &model.vertices[node.vertex_pool_index..node.vertex_pool_index + node.vertex_count];
+            let point_indices = vertices.iter().map(|vertex| vertex.vertex_index).collect::<Vec<usize>>();
+            let face_indices = &point_indices.iter().map(|i| (i + 1).to_string()).collect::<Vec<String>>().join(" ");
+    
+            obj.write(format!("f {}\n", face_indices).as_bytes());
+        }
+    } else {
+        println!("Failed to create OBJ file.");
     }
 }
 
@@ -298,11 +305,17 @@ fn bsp_brush_subtract_and_add_test() {
     };
     bsp_validate_brush(&mut subtraction_brush.model, false);
 
+    // TODO: all the normals are flipped on the addition brush...
+
     // Create a smaller additive brush inside the subtraction brush.
-    let polys = create_cube_polys(FVector::new(0.0, 0.0, 0.0), FVector::new(0.5, 0.5, 0.5));
+    let mut polys = create_cube_polys(FVector::new(0.5, 0.5, 0.5), FVector::new(1.0, 1.0, 1.0));
+    // Flip the normals.
+    for poly in polys.iter_mut() {
+        poly.normal = -poly.normal;
+    }
     let mut addition_brush = ABrush {
         model: UModel::new_from_polys(&polys),
-        location: FVector::new(0.9, 0.5, 0.5),
+        location: FVector::new(0.0, 0.0, 0.0),
         pre_pivot: FVector::new(0.0, 0.0, 0.0),
         csg_operation: bdk_py::bsp::ECsgOper::Add,
         poly_flags: EPolyFlags::empty(),
@@ -318,7 +331,7 @@ fn bsp_brush_subtract_and_add_test() {
 
     bsp_brush_csg(&addition_brush, &mut model, EPolyFlags::empty(), bdk_py::bsp::ECsgOper::Add, false);
 
-    output_obj(&model);
+    output_obj(&model, "subtract_and_add.obj");
 }
 
 #[test]
@@ -336,10 +349,14 @@ fn bsp_brush_csg_subtract_test() {
 
     bsp_validate_brush(&mut brush.model, false);
 
+    model.is_root_outside = false;  // TODO: have this done in ULevel
+
     // Act
     bsp_brush_csg(&brush, &mut model, EPolyFlags::empty(), bdk_py::bsp::ECsgOper::Subtract, false);
 
     // Assert
     assert_eq!(model.nodes.len(), 6);
     assert_eq!(model.surfaces.len(), 6);
+
+    output_obj(&model, "subtract.obj");
 }

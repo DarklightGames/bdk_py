@@ -167,7 +167,15 @@ impl FPoly {
     pub fn from_vertices(vertices: &[FVector]) -> Self {
         let mut fpoly = FPoly::new();
         _ = fpoly.vertices.try_extend_from_slice(vertices);
-        // fpoly.base = fpoly.vertices[0];  // TODO: the selection of the base vertex seems arbitrary
+        fpoly.base = fpoly.vertices[0];  // TODO: the selection of the base vertex seems arbitrary
+        _ = fpoly.calc_normal();
+        fpoly
+    }
+
+    pub fn from_vertices_and_base(vertices: &[FVector], base: &FVector) -> Self {
+        let mut fpoly = FPoly::new();
+        _ = fpoly.vertices.try_extend_from_slice(vertices);
+        fpoly.base = *base;
         _ = fpoly.calc_normal();
         fpoly
     }
@@ -212,6 +220,10 @@ impl FPoly {
     /// vertex count to zero if it collapses.  Returns number of vertices, 0 or >=3.
     pub fn fix(&mut self) -> usize {
         use math::points_are_same;
+
+        if self.vertices.is_empty() {
+            return 0;
+        }
 
         let mut prev = self.vertices.len() - 1;
         let mut j = 0usize;
@@ -265,6 +277,7 @@ impl FPoly {
         // calculate the minimum and maximum signed distance (in the direction
         // of the normal) from each point to the plane of SplitPoly.
         let mut status_previous = ESplitPlaneStatus::Either;
+        let mut distance = 0f32;
         let mut distance_max = f32::MIN;
         let mut distance_min = f32::MAX;
 
@@ -273,7 +286,7 @@ impl FPoly {
         // calculate the minimum and maximum signed distance (in the direction
         // of the normal) from each point to the plane of SplitPoly.
         for vertex in &self.vertices {
-            let distance = point_plane_distance(vertex, &plane_base, &plane_normal);
+            distance = point_plane_distance(vertex, &plane_base, &plane_normal);
             distance_max = distance.max(distance_max);
             distance_min = distance.min(distance_min);
             if distance > threshold {
@@ -290,20 +303,21 @@ impl FPoly {
         } else if distance_min > -threshold {
             ESplitType::Front
         } else {
-            // TODO: copy this poly twice
+            // Split.
             let mut front_poly = self.clone();
-            front_poly.poly_flags.set(EPolyFlags::EdCut, true); // Mark as cut.
+            front_poly.poly_flags |= EPolyFlags::EdCut; // Mark as cut.
             front_poly.vertices.clear();
 
             let mut back_poly = self.clone();
-            back_poly.poly_flags.set(EPolyFlags::EdCut, true);  // Mark as cut.
+            back_poly.poly_flags |= EPolyFlags::EdCut;  // Mark as cut.
             back_poly.vertices.clear();
 
             let mut j = self.vertices.len() - 1; // Previous vertex; have PrevStatus already.
-            let mut distance_previous = 0f32;
+            let mut distance_previous: f32;
 
             for i in 0..self.vertices.len() {
-                let distance = point_plane_distance(&self.vertices[i], &plane_base, &plane_normal);
+                distance_previous = distance;
+                distance = point_plane_distance(&self.vertices[i], &plane_base, &plane_normal);
 
                 let status = if distance > threshold {
                     ESplitPlaneStatus::Front
@@ -358,7 +372,6 @@ impl FPoly {
 
                 j = i;
                 status_previous = status;
-                distance_previous = distance;
             }
 
             // Handle possibility of sliver polys due to precision errors.

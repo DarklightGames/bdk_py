@@ -270,7 +270,7 @@ impl UModel {
             bounding_sphere: FSphere::default(),
             bounding_box: FBox::default(),
             linked: false,
-            is_root_outside: true,  // TODO: what even is this?
+            is_root_outside: true,
         }
     }
 

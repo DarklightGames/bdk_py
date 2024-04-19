@@ -120,6 +120,35 @@ fn fpoly_split_with_plane_front_test() {
 }
 
 #[test]
+fn fpoly_split_with_plane_split_weird_test() {
+    let plane_normal = FVector::new(-0.0, -1.0, 0.0);
+    let plane_base = FVector::new(1.0, 1.0, 0.0);
+    let polygon = FPoly::from_vertices(&[
+        FVector::new(1.5, 1.5, 0.5),
+        FVector::new(1.5, 1.5, 1.0),
+        FVector::new(1.5, 0.5, 1.0),
+        FVector::new(1.5, 0.5, 0.5),
+    ]);
+
+    let split_result = polygon.split_with_plane(plane_base, plane_normal, false);
+    match split_result {
+        ESplitType::Split(front_poly, back_poly) => {
+            assert_eq!(front_poly.vertices.len(), 4);
+            assert_eq!(back_poly.vertices.len(), 4);
+            front_poly.poly_flags.contains(EPolyFlags::EdCut);
+            back_poly.poly_flags.contains(EPolyFlags::EdCut);
+        },
+        _ => {
+            assert!(false, "Split result was not a split");
+        }
+    }
+
+    // Node Base: Vector3 [1.0, 1.0, 0.0], Node Normal: Vector3 [-0.0, -1.0, -0.0]
+    //split_result: Split(FPoly { base: Vector3 [1.5, 1.5, 0.5], normal: Vector3 [-1.0, -0.0, -0.0], texture_u: Vector3 [0.0, 0.0, 0.0], texture_v: Vector3 [0.0, 0.0, 0.0], vertices: [Vector3 [1.5, 1.0, 1.0], Vector3 [1.5, 0.5, 1.0], Vector3 [1.5, 0.5, 0.5]], poly_flags: EPolyFlags(2147483648), actor: None, link: Some(11), brush_poly_index: Some(5), save_poly_index: None, save_normal: Vector3 [0.0, 0.0, 0.0], uv: [Vector3 [0.0, 0.0, 0.0], Vector3 [0.0, 0.0, 0.0], Vector3 [0.0, 0.0, 0.0]], smoothing_mask: 0, light_map_scale: 32.0 }, FPoly { base: Vector3 [1.5, 1.5, 0.5], normal: Vector3 [-1.0, -0.0, -0.0], texture_u: Vector3 [0.0, 0.0, 0.0], texture_v: Vector3 [0.0, 0.0, 0.0], vertices: [Vector3 [1.5, 0.5, 0.5], Vector3 [1.5, 1.5, 0.5], Vector3 [1.5, 1.5, 1.0], Vector3 [1.5, 1.0, 1.0]], poly_flags: EPolyFlags(2147483648), actor: None, link: Some(11), brush_poly_index: Some(5), save_poly_index: None, save_normal: Vector3 [0.0, 0.0, 0.0], uv: [Vector3 [0.0, 0.0, 0.0], Vector3 [0.0, 0.0, 0.0], Vector3 [0.0, 0.0, 0.0]], smoothing_mask: 0, light_map_scale: 32.0 })
+    //Polygon that was split: FPoly { base: Vector3 [1.5, 1.5, 0.5], normal: Vector3 [-1.0, -0.0, -0.0], texture_u: Vector3 [0.0, 0.0, 0.0], texture_v: Vector3 [0.0, 0.0, 0.0], vertices: [Vector3 [1.5, 1.5, 0.5], Vector3 [1.5, 1.5, 1.0], Vector3 [1.5, 0.5, 1.0], Vector3 [1.5, 0.5, 0.5]], poly_flags: EPolyFlags(2147483648), actor: None, link: Some(11), brush_poly_index: Some(5), save_poly_index: None, save_normal: Vector3 [0.0, 0.0, 0.0], uv: [Vector3 [0.0, 0.0, 0.0], Vector3 [0.0, 0.0, 0.0], Vector3 [0.0, 0.0, 0.0]], smoothing_mask: 0, light_map_scale: 32.0 }
+}
+
+#[test]
 fn fpoly_split_with_plane_split_test() {
     // Arrange
     let fpoly = get_z_up_quad_fpoly();
@@ -130,19 +159,19 @@ fn fpoly_split_with_plane_split_test() {
     let split_type = fpoly.split_with_plane(plane_base, plane_normal, false);
 
     // Assert
-    let mut front_poly = FPoly::from_vertices(&[
+    let mut front_poly = FPoly::from_vertices_and_base(&[
         FVector::new(0.0, -1.0, 0.0),
         FVector::new(1.0, -1.0, 0.0),
         FVector::new(1.0, 1.0, 0.0),
         FVector::new(0.0, 1.0, 0.0)
-    ]);
+    ], &fpoly.base);
     front_poly.poly_flags.set(EPolyFlags::EdCut, true);
-    let mut back_poly = FPoly::from_vertices(&[
+    let mut back_poly = FPoly::from_vertices_and_base(&[
         FVector::new(-1.0, -1.0, 0.0),
         FVector::new( 0.0, -1.0, 0.0),
         FVector::new( 0.0, 1.0, 0.0),
         FVector::new(-1.0, 1.0, 0.0)
-    ]);
+    ], &fpoly.base);
     back_poly.poly_flags.set(EPolyFlags::EdCut, true);
     assert_eq!(split_type, ESplitType::Split(front_poly, back_poly))
 }
@@ -157,18 +186,18 @@ fn fpoly_split_with_plane_quad_to_tris() {
 
     let split_type = fpoly.split_with_plane(plane_base, plane_normal, false);
 
-    let mut front_poly = FPoly::from_vertices(&[
+    let mut front_poly = FPoly::from_vertices_and_base(&[
         FVector::new(1.0, -1.0, 0.0),
         FVector::new(1.0, 1.0, 0.0),
         FVector::new(-1.0, 1.0, 0.0)
-    ]);
+    ], &fpoly.base);
     front_poly.poly_flags.set(EPolyFlags::EdCut, true);
 
-    let mut back_poly = FPoly::from_vertices(&[
+    let mut back_poly = FPoly::from_vertices_and_base(&[
         FVector::new(-1.0, 1.0, 0.0),
         FVector::new(-1.0, -1.0, 0.0),
         FVector::new(1.0, -1.0, 0.0)
-    ]);
+    ], &fpoly.base);
     back_poly.poly_flags.set(EPolyFlags::EdCut, true);
 
     assert_eq!(split_type, ESplitType::Split(front_poly, back_poly))
@@ -220,18 +249,18 @@ fn fpoly_split_with_plane_fast_split_test() {
     let split_type = fpoly.split_with_plane_fast(&plane_base, &plane_normal);
 
     // Assert
-    let front_poly = FPoly::from_vertices(&[
+    let front_poly = FPoly::from_vertices_and_base(&[
         FVector::new(0.0, -1.0, 0.0),
         FVector::new(1.0, -1.0, 0.0),
         FVector::new(1.0, 1.0, 0.0),
         FVector::new(0.0, 1.0, 0.0)
-    ]);
-    let back_poly = FPoly::from_vertices(&[
+    ], &fpoly.base);
+    let back_poly = FPoly::from_vertices_and_base(&[
         FVector::new(-1.0, -1.0, 0.0),
         FVector::new( 0.0, -1.0, 0.0),
         FVector::new( 0.0, 1.0, 0.0),
         FVector::new(-1.0, 1.0, 0.0)
-    ]);
+    ], &fpoly.base);
     assert_eq!(split_type, ESplitType::Split(front_poly, back_poly))
 }
 
@@ -245,19 +274,19 @@ fn fpoly_split_with_plane_fast_quad_to_tris() {
     let split_type = fpoly.split_with_plane_fast(&plane_base, &plane_normal);
 
     // split_with_plane_fast does not remove duplicate vertices.
-    let front_poly = FPoly::from_vertices(&[
+    let front_poly = FPoly::from_vertices_and_base(&[
         FVector::new(-1.0, 1.0, 0.0),
         FVector::new(1.0, -1.0, 0.0),
         FVector::new(1.0, -1.0, 0.0),
         FVector::new(1.0, 1.0, 0.0),
         FVector::new(-1.0, 1.0, 0.0)
-    ]);
+    ], &fpoly.base);
 
-    let back_poly = FPoly::from_vertices(&[
+    let back_poly = FPoly::from_vertices_and_base(&[
         FVector::new(-1.0, 1.0, 0.0),
         FVector::new(-1.0, -1.0, 0.0),
         FVector::new(1.0, -1.0, 0.0)
-    ]);
+    ], &fpoly.base);
 
     assert_eq!(split_type, ESplitType::Split(front_poly, back_poly))
 }
@@ -547,7 +576,7 @@ fn fpoly_from_vertices_base_test() {
         FVector::new(-1.0,  1.0, 1.0),
     ]);
 
-    // assert_eq!(poly.base, FVector::new(-1.0, -1.0, 1.0));
+    assert_eq!(poly.base, FVector::new(-1.0, -1.0, 1.0));
 }
 
 /// Test that a polygon that is transformed with the identity transformation
