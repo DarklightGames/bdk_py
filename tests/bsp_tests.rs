@@ -2,7 +2,7 @@ use std::io::Write;
 
 use bdk_py::brush::ABrush;
 use bdk_py::math::FVector;
-use bdk_py::bsp::{bsp_add_node, bsp_brush_csg, bsp_filter_fpoly, bsp_validate_brush, find_best_split, merge_coplanars, try_to_merge, EBspOptimization, ENodePlace};
+use bdk_py::bsp::{bsp_add_node, bsp_brush_csg, bsp_validate_brush, find_best_split, merge_coplanars, try_to_merge, EBspOptimization, ENodePlace};
 use bdk_py::fpoly::{EPolyFlags, FPoly};
 use bdk_py::model::{EBspNodeFlags, UModel};
 
@@ -80,8 +80,12 @@ fn try_to_merge_identical_triangles_test() {
     assert_eq!(try_to_merge(&mut poly1, &mut poly2), false);
 }
 
-/// Creates a unit cube with 6 polygons, with normals pointing outwards.
 fn create_cube_polys(min: FVector, extents: FVector) -> Vec<FPoly> {
+    create_cube_polys_with_poly_flags(min, extents, EPolyFlags::empty())
+}
+
+/// Creates a unit cube with 6 polygons, with normals pointing outwards.
+fn create_cube_polys_with_poly_flags(min: FVector, extents: FVector, poly_flags: EPolyFlags) -> Vec<FPoly> {
     let vertices = vec![
         FVector::new(0.0, 0.0, 0.0),
         FVector::new(1.0, 0.0, 0.0),
@@ -126,7 +130,9 @@ fn create_cube_polys(min: FVector, extents: FVector) -> Vec<FPoly> {
     }
 
     let polys = poly_vertex_indices.iter().map(|indices| {
-        FPoly::from_vertices(&indices.iter().map(|i| vertices[*i]).collect::<Vec<FVector>>())
+        let mut poly = FPoly::from_vertices(&indices.iter().map(|i| vertices[*i]).collect::<Vec<FVector>>());
+        poly.poly_flags = poly_flags;
+        poly
     }).collect::<Vec<FPoly>>();
 
     polys
@@ -193,7 +199,7 @@ fn merge_coplanars_quad_grid_with_skipped_index_test() {
 
 #[test]
 fn find_best_split_single_poly_test() {
-    // 
+    // Arrange
     let polys = vec![
         FPoly::from_vertices(&vec![
             FVector::new(0.0, 0.0, 0.0),
@@ -210,14 +216,42 @@ fn find_best_split_single_poly_test() {
     assert_eq!(split_index, Some(0));
 }
 
+/// Test the find_best_split function with a cube where all the polygons are semisolids.
+/// 
+/// It must pick a polygon, even if it is a semisolid.
 #[test]
 fn find_best_split_all_semisolids_test() {
+    // Arrange
+    let polys = create_cube_polys_with_poly_flags(FVector::new(0.0, 0.0, 0.0), FVector::new(1.0, 1.0, 1.0), EPolyFlags::Semisolid);
+
+    // Act
+    let split_index = find_best_split(&polys, EBspOptimization::Lame, 70, 0);
+
+    // Assert
+    assert_eq!(split_index, Some(0));
 }
 
+/// Test the find_best_split function with a cube.
+/// The best split is any of the 6 faces of the cube, but the first face is chosen.
+#[test]
+fn find_best_split_cube_test() {
+    // Arrange
+    let polys = create_cube_polys(FVector::new(0.0, 0.0, 0.0), FVector::new(1.0, 1.0, 1.0));
+
+    // Act
+    let split_index = find_best_split(&polys, EBspOptimization::Lame, 70, 0);
+
+    // Assert
+    assert_eq!(split_index, Some(0));
+}
+
+/// Stack 3 identical polygons with 1 unit of difference between them along Z.
+/// 
+/// The middle polygon should be the best split polygon because it has one
+/// polygon behind it and one polygon in front of it.
 #[test]
 fn find_best_split_test() {
     // Arrange
-    // Stack 3 identical polygons with 1 unit of difference between them along Z.
     let polys = vec![
         FPoly::from_vertices(&[
             FVector::new(0.0, 0.0, 0.0),
@@ -240,8 +274,6 @@ fn find_best_split_test() {
     let split_index = find_best_split(&polys, EBspOptimization::Optimal, 50, 50);
 
     // Assert
-    // The middle polygon should be the best split polygon because it
-    // has one polygon behind it and one polygon in front of it.
     assert_eq!(split_index, Some(1))
 }
 
@@ -325,7 +357,9 @@ fn bsp_brush_subtract_and_add_test() {
 
     bsp_brush_csg(&subtraction_brush, &mut model, EPolyFlags::empty(), bdk_py::bsp::ECsgOper::Subtract, false);
 
-    model.is_root_outside = true;
+    // model.is_root_outside = true;
+
+    // addition_brush.model.is_root_outside = false;
 
     bsp_brush_csg(&addition_brush, &mut model, EPolyFlags::empty(), bdk_py::bsp::ECsgOper::Add, false);
 

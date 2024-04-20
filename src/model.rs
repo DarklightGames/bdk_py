@@ -174,7 +174,7 @@ impl FBspNode {
     }
 
     pub fn is_csg(&self, extra_flags: EBspNodeFlags) -> bool {
-        self.vertex_count > 0 && self.node_flags.contains(EBspNodeFlags::IsNew | EBspNodeFlags::NotCsg | extra_flags)
+        self.vertex_count > 0 && !self.node_flags.intersects(EBspNodeFlags::IsNew | EBspNodeFlags::NotCsg | extra_flags)
     }
 
     pub fn is_child_outside(&self, child_index: usize, outside: bool, extra_flags: EBspNodeFlags) -> bool {
