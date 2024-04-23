@@ -248,14 +248,14 @@ pub struct UModel {
 
 impl UModel {
     pub fn new_from_polys(polys: &[FPoly]) -> UModel {
-        let mut model = UModel::new();
+        let mut model = UModel::new(false);
         for poly in polys {
             model.polys.push(poly.clone());
         }
         model
     }
 
-    pub fn new() -> UModel {
+    pub fn new(is_root_outside: bool) -> UModel {
         UModel {
             vertices: Vec::new(),
             points: Vec::new(),
@@ -270,7 +270,7 @@ impl UModel {
             bounding_sphere: FSphere::default(),
             bounding_box: FBox::default(),
             linked: false,
-            is_root_outside: true,
+            is_root_outside,
         }
     }
 

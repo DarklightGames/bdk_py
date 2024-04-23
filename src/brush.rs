@@ -1,5 +1,5 @@
-use crate::bsp::ECsgOper;
-use crate::fpoly::EPolyFlags;
+use crate::bsp::{bsp_validate_brush, ECsgOper};
+use crate::fpoly::{FPoly, EPolyFlags};
 use crate::model::UModel;
 use crate::math::FVector;
 use crate::coords::{FCoords, FModelCoords};
@@ -14,6 +14,20 @@ pub struct ABrush {
 }
 
 impl ABrush {
+    // TODO: consider just nuking the location & prepivot and expect the user to pass in the world-space polys.
+    pub fn new(polys: &[FPoly], location: FVector, poly_flags: EPolyFlags, csg_operation: ECsgOper) -> Self {
+        let mut model = UModel::new(true);
+        model.polys = polys.to_vec();
+        bsp_validate_brush(&mut model, false);
+        ABrush {
+            model,
+            location,
+            pre_pivot: FVector::new(0.0, 0.0, 0.0),
+            poly_flags,
+            csg_operation,
+        }
+    }
+
     pub fn build_coords() -> (FModelCoords, FModelCoords, f32) {
         let coords = FModelCoords {
             covariant: FCoords::new(),

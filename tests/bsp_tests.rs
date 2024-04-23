@@ -2,7 +2,7 @@ use std::io::Write;
 
 use bdk_py::brush::ABrush;
 use bdk_py::math::FVector;
-use bdk_py::bsp::{bsp_add_node, bsp_brush_csg, bsp_validate_brush, find_best_split, merge_coplanars, try_to_merge, EBspOptimization, ENodePlace};
+use bdk_py::bsp::{bsp_add_node, bsp_brush_csg, bsp_validate_brush, find_best_split, merge_coplanars, try_to_merge, EBspOptimization, ENodePlace, bsp_merge_coplanars, bsp_build_fpolys};
 use bdk_py::fpoly::{EPolyFlags, FPoly};
 use bdk_py::model::{EBspNodeFlags, UModel};
 
@@ -116,18 +116,14 @@ fn create_cube_polys_with_poly_flags(min: FVector, extents: FVector, poly_flags:
     //    | /      | /
     //    |/       |/
     //    0--------1
-    let mut poly_vertex_indices: [Vec<usize>; 6] = [
-        vec![0, 1, 2, 3],
-        vec![4, 7, 6, 5],
-        vec![0, 4, 5, 1],
-        vec![2, 6, 7, 3],
-        vec![3, 7, 4, 0],
-        vec![1, 5, 6, 2],
+    let poly_vertex_indices: [Vec<usize>; 6] = [
+        vec![0, 4, 7, 3],
+        vec![3, 7, 6, 2],
+        vec![2, 6, 5, 1],
+        vec![1, 5, 4, 0],
+        vec![3, 2, 1, 0],
+        vec![6, 7, 4, 5],
     ];
-    // // Reverse the order of all the faces to flip the normals.
-    for indices in poly_vertex_indices.iter_mut() {
-        indices.reverse();
-    }
 
     let polys = poly_vertex_indices.iter().map(|indices| {
         let mut poly = FPoly::from_vertices(&indices.iter().map(|i| vertices[*i]).collect::<Vec<FVector>>());
@@ -279,7 +275,7 @@ fn find_best_split_test() {
 
 #[test]
 fn bsp_add_node_root_node() {
-    let mut model = UModel::new();
+    let mut model = UModel::new(false);
     let mut poly = FPoly::from_vertices(&vec![
         FVector::new(0.0, 0.0, 0.0),
         FVector::new(1.0, 0.0, 0.0),
@@ -322,7 +318,7 @@ fn output_obj(model: &UModel, path: &str) {
 #[test]
 fn bsp_brush_subtract_and_add_test() {
     // Arrange
-    let mut model = UModel::new();
+    let mut model = UModel::new(false);
 
     // Create the main subtraction brush.
     let polys = create_cube_polys(FVector::new(0.0, 0.0, 0.0), FVector::new(1.0, 1.0, 1.0));
@@ -353,8 +349,6 @@ fn bsp_brush_subtract_and_add_test() {
     bsp_validate_brush(&mut addition_brush.model, false);
 
     // Act
-    model.is_root_outside = false;
-
     bsp_brush_csg(&subtraction_brush, &mut model, EPolyFlags::empty(), bdk_py::bsp::ECsgOper::Subtract, false);
 
     // model.is_root_outside = true;
@@ -369,7 +363,7 @@ fn bsp_brush_subtract_and_add_test() {
 #[test]
 fn bsp_brush_csg_subtract_test() {
     // Arrange
-    let mut model = UModel::new();
+    let mut model = UModel::new(false);
     let polys = create_cube_polys(FVector::new(0.0, 0.0, 0.0), FVector::new(1.0, 1.0, 1.0));
     let mut brush = ABrush {
         model: UModel::new_from_polys(&polys),
@@ -381,8 +375,6 @@ fn bsp_brush_csg_subtract_test() {
 
     bsp_validate_brush(&mut brush.model, false);
 
-    model.is_root_outside = false;  // TODO: have this done in ULevel
-
     // Act
     bsp_brush_csg(&brush, &mut model, EPolyFlags::empty(), bdk_py::bsp::ECsgOper::Subtract, false);
 
@@ -391,4 +383,29 @@ fn bsp_brush_csg_subtract_test() {
     assert_eq!(model.surfaces.len(), 6);
 
     output_obj(&model, "subtract.obj");
+}
+
+#[test]
+fn bsp_merge_coplanars_test() {
+    // TODO: make a more substantive test, this was just made to make sure it doesn't crash.
+
+    // Arrange
+    let mut model = UModel::new(false);
+    let polys = create_cube_polys(FVector::new(0.0, 0.0, 0.0), FVector::new(1.0, 1.0, 1.0));
+    let mut brush = ABrush {
+        model: UModel::new_from_polys(&polys),
+        location: FVector::new(0.0, 0.0, 0.0),
+        pre_pivot: FVector::new(0.0, 0.0, 0.0),
+        csg_operation: bdk_py::bsp::ECsgOper::Subtract,
+        poly_flags: EPolyFlags::empty(),
+    };
+
+    bsp_validate_brush(&mut brush.model, false);
+    bsp_brush_csg(&brush, &mut model, EPolyFlags::empty(), bdk_py::bsp::ECsgOper::Subtract, false);
+
+    // Act
+    bsp_build_fpolys(&mut model, false, 0);
+    bsp_merge_coplanars(&mut model, false, false);
+
+    // Assert
 }

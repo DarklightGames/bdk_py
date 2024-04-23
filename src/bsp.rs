@@ -533,6 +533,8 @@ fn filter_ed_poly(filter_func: BspFilterFunc, model: &mut UModel, mut node_index
                 }
             }
             ESplitType::Coplanar => {
+                println!("coplanar!");
+
                 if coplanar_info.original_node.is_some() {
                     // This will happen once in a blue moon when a polygon is barely outside the
                     // coplanar threshold and is split up into a new polygon that is
@@ -675,14 +677,24 @@ fn subtract_brush_from_world_func(model: &mut UModel, node_index: usize, ed_poly
 
 /// Merge all coplanar EdPolys in a model.  Not transactional.
 /// Preserves (though reorders) iLinks.
-fn bsp_merge_coplanars(model: &mut UModel, should_remap_links: bool, should_merge_disparate_textures: bool) {
+pub fn bsp_merge_coplanars(model: &mut UModel, should_remap_links: bool, should_merge_disparate_textures: bool) {
     let original_num = model.polys.len();
 
     // Mark all polys as unprocessed.
     model.polys.iter_mut().for_each(|poly| poly.poly_flags.remove(EPolyFlags::EdProcessed));
 
+    println!("BspMergeCoplanars: {} polys", model.polys.len());
+
     // Find matching coplanars and merge them.
-    let mut poly_list: Vec<usize> = Vec::new();
+    let mut poly_list: Vec<usize> = vec![0; model.polys.len()];
+
+    println!("Length of poly_list: {}", poly_list.len());
+
+    // Print out all the vertices for each poly.
+    for (i, poly) in model.polys.iter().enumerate() {
+        println!("Poly {} vertices: {:?}", i, poly.vertices);
+    }
+
     let mut n = 0;
 
     for i in 0..model.polys.len() {
@@ -703,6 +715,7 @@ fn bsp_merge_coplanars(model: &mut UModel, should_remap_links: bool, should_merg
             if other_poly.link != ed_poly.link {
                 continue;
             }
+
             let distance = (other_poly.vertices[0] - ed_poly.vertices[0]).dot(ed_poly.normal);
             // TODO: make this easier to understand what it's doing.
             let a = distance > -0.001 && distance < 0.001 && other_poly.normal.dot(ed_poly.normal) > 0.999;
@@ -794,7 +807,8 @@ fn bsp_node_to_fpoly(model: &UModel, node_index: usize) -> Option<FPoly> {
     let poly = &model.surfaces[node.surface_index];
     let vert_pool = &model.vertices[node.vertex_pool_index..node.vertex_pool_index + node.vertex_count];
 
-    if vert_pool.len() < 3 {
+    // BDK: Early out if the poly is degenerate. We do another check after removing colinear vertices at the end.
+    if node.vertex_count < 3 {
         return None
     }
 
@@ -820,6 +834,10 @@ fn bsp_node_to_fpoly(model: &UModel, node_index: usize) -> Option<FPoly> {
 
     ed_poly.remove_colinears();
     
+    if ed_poly.vertices.len() < 3 {
+        return None
+    }
+
     Some(ed_poly)
 }
 
@@ -916,6 +934,7 @@ fn filter_world_through_brush(model: &mut UModel, brush: &mut UModel, csg_operat
 
                 if filter_context.discarded == 0 {
                     // Get rid of all the fragments we added.
+                    // BDK: `filter_context` and `model` 
                     filter_context.model.nodes[filter_context.last_coplanar_node_index].plane_index = None;
                     filter_context.model.nodes.truncate(node_count);
                 } else {
@@ -963,7 +982,7 @@ pub fn bsp_brush_csg(
     };
 
     // TODO: we're making a whole new model here, but the original code uses a global and clears it.
-    let mut temp_model: UModel = UModel::new();
+    let mut temp_model: UModel = UModel::new(true);
 
     // Build the brush's coordinate system and find orientation of scale
 	// transform (if negative, edpolyTransform will reverse the clockness
@@ -1026,7 +1045,7 @@ pub fn bsp_brush_csg(
         }
 
         // HACK: create a filter context here, it won't actually be used in this case but it's necessary for the call.
-        let mut dummy_model = UModel::new();
+        let mut dummy_model = UModel::new(true);
         let mut filter_context = FilterContext {
             discarded: 0,
             node_index: 0,
@@ -1267,7 +1286,7 @@ fn filter_bound(model: &mut UModel, parent_bound: Option<&mut FBox>, node_index:
 ///
 /// We start with a practically-infinite cube and filter it down the Bsp,
 /// whittling it away until all of its convex volume fragments land in leaves.
-fn bsp_build_bounds(model: &mut UModel) {
+pub fn bsp_build_bounds(model: &mut UModel) {
     if model.nodes.is_empty() {
         return;
     }
@@ -1720,4 +1739,53 @@ fn tag_referenced_nodes(model: &UModel, node_ref: &mut [Option<usize>], poly_ref
             node_index_stack.push(plane_node_index);
         }
     }
+}
+
+fn make_ed_polys(model: &mut UModel) {
+    let mut node_index_stack = vec![0usize];
+    while let Some(node_index) = node_index_stack.pop() {
+        if let Some(fpoly) = bsp_node_to_fpoly(model, node_index) {
+            model.polys.push(fpoly);
+        }
+        let node = &model.nodes[node_index];
+
+        if let Some(front_node_index) = node.front_node_index {
+            node_index_stack.push(front_node_index);
+        }
+        if let Some(back_node_index) = node.back_node_index {
+            node_index_stack.push(back_node_index);
+        }
+        if let Some(plane_node_index) = node.plane_index {
+            node_index_stack.push(plane_node_index);
+        }
+    }
+}
+
+/// Build EdPoly list from a model's Bsp. Not transactional.
+pub fn bsp_build_fpolys(model: &mut UModel, surf_links: bool, node_index: usize) {
+    model.polys.clear();
+
+    if !model.nodes.is_empty() {
+        make_ed_polys(model);
+    }
+
+    if !surf_links {
+        for (poly_index, poly) in model.polys.iter_mut().enumerate() {
+            poly.link = Some(poly_index);
+        }
+    }
+}
+
+pub fn bsp_repartition(model: &mut UModel, node_index: usize, rebuild_simple_polys: bool) {
+    bsp_build_fpolys(model, true, node_index);
+    bsp_merge_coplanars(model, false, false);
+    bsp_build(model, EBspOptimization::Good, 12, 70, rebuild_simple_polys);
+    bsp_refresh(model, true);
+}
+
+pub fn bsp_opt_geom(model: &mut UModel) {
+    merge_near_points(model, 0.25f32);
+    bsp_refresh(model, false);
+
+    // TODO: more to do here, come back to this when we have other things fixed and working.
 }

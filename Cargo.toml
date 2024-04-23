@@ -13,6 +13,7 @@ crate-type = ["cdylib", "lib"]
 cgmath = "0.18.0"
 arrayvec = "0.7.4"
 bitflags = "2.4.0"
+phf = { version = "0.11", features = ["macros"] }
 
 [dependencies.pyo3]
 version = "0.21.1"
