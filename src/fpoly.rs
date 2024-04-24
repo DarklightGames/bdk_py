@@ -470,7 +470,7 @@ impl FPoly {
 
     /// Split an FPoly in half.
     pub fn split_in_half(&mut self) -> Option<FPoly> {
-        if self.vertices.len() <= 3 || self.vertices.len() > FPOLY_MAX_VERTICES {
+        if self.vertices.len() <= 3 {
             return None;
         }
 

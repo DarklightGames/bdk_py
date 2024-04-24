@@ -30,22 +30,54 @@ impl Poly {
     }
 
     fn split(&mut self) -> Option<Poly> {
-        // If the poly has less than 8 vertices, we don't need to split it.
-        // This is more or less identical to FPoly::split_in_half.
-        if self.vertices.len() < FPOLY_MAX_VERTICES {
+        if self.vertices.len() < FPOLY_VERTEX_THRESHOLD + 1 {
             return None;
         }
-
         let mut other_half = self.clone();
-
         self.vertices.truncate(FPOLY_VERTEX_THRESHOLD);
-        other_half.vertices.drain(0..FPOLY_VERTEX_THRESHOLD);
-        other_half.vertices.push(self.vertices[0]);
-
+        println!("self.vertices.len() = {}", self.vertices.len());
+        other_half.vertices.drain(1..FPOLY_VERTEX_THRESHOLD - 1);
+        println!("other_half.vertices.len() = {}", other_half.vertices.len());
         Some(other_half)
-
     }
 }
+
+fn create_circle_poly(num_verts: usize) -> Poly {
+    let mut vertices: Vec<(f32, f32, f32)> = Vec::new();
+    for i in 0..num_verts {
+        let angle = 2.0 * std::f32::consts::PI * i as f32 / num_verts as f32;
+        vertices.push((angle.cos(), angle.sin(), 0.0));
+    }
+    Poly { vertices }
+}
+
+#[test]
+fn brush_ensure_polys_no_degenerates_test() {
+    // Create a 32-sided circle polygon.
+    for i in 3..33 {
+        let poly = create_circle_poly(i);
+        let mut brush = Brush { id: 0, name: "Test".to_string(), polys: vec![poly], poly_flags: HashSet::new(), csg_operation: CsgOperation::Add };
+        brush.ensure_polys();
+        
+        // None of the polys should be degenerate.
+        for (j, poly) in brush.polys.iter().enumerate() {
+            assert!(poly.vertices.len() >= 3, "Shape with {} verts, split poly {} has less than 3 vertices", i, j);
+        }
+    }
+}
+
+#[test]
+fn brush_ensure_polys_17_sided_cylinder_test() {
+    // Create a 17-sided cylinder.
+    let poly = create_circle_poly(16);
+    let mut brush = Brush { id: 0, name: "Test".to_string(), polys: vec![poly], poly_flags: HashSet::new(), csg_operation: CsgOperation::Add };
+    brush.ensure_polys();
+
+    assert_eq!(brush.polys.len(), 2, "Expected 2 polys, got {}", brush.polys.len());
+    assert_eq!(brush.polys[0].vertices.len(), 14);
+    assert_eq!(brush.polys[1].vertices.len(), 4);
+}
+
 
 #[pyclass]
 #[derive(Clone, Copy, Debug)]
@@ -162,26 +194,6 @@ impl From<&PyRef<'_, Brush>> for crate::brush::ABrush {
             polys.as_slice(),
             EPolyFlags::from(&brush.poly_flags),
             brush.csg_operation.into())
-    }
-}
-
-#[test]
-fn brush_ensure_polys_test() {
-    // Create a 32-sided circle polygon.
-    for i in 3..33 {
-        let mut vertices: Vec<(f32, f32, f32)> = Vec::new();
-        for j in 0..i {
-            let angle = 2.0 * std::f32::consts::PI * j as f32 / i as f32;
-            vertices.push((angle.cos(), angle.sin(), 0.0));
-        }
-        let poly = Poly { vertices };
-        let mut brush = Brush { id: 0, name: "Test".to_string(), polys: vec![poly], poly_flags: HashSet::new(), csg_operation: CsgOperation::Add };
-        brush.ensure_polys();
-        
-        // None of the polys should be degenerate.
-        for (j, poly) in brush.polys.iter().enumerate() {
-            assert!(poly.vertices.len() >= 3, "Shape with {} verts, split poly {} has less than 3 vertices", i, j);
-        }
     }
 }
 
