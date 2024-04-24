@@ -7,9 +7,6 @@ use crate::fpoly::ESplitPlaneStatus::Front;
 use crate::math::{self, transform_vector_by_coords, FLOAT_NORMAL_THRESH, SMALL_NUMBER, THRESH_POINT_ON_PLANE};
 use crate::math::{point_plane_distance, line_plane_intersection, THRESH_SPLIT_POLY_WITH_PLANE, points_are_near, THRESH_ZERO_NORM_SQUARED};
 use crate::model::UModel;
-use crate::brush::ABrush;
-use std::rc::Rc;
-use std::cell::RefCell;
 
 /// Maximum vertices an FPoly may have.
 pub const FPOLY_MAX_VERTICES: usize = 16;
@@ -134,7 +131,7 @@ pub struct FPoly {
     /// FPoly & Bsp poly bit flags (PF_).
     pub poly_flags: EPolyFlags,
     /// Brush where this originated, or NULL.
-    pub actor: Option<Rc<RefCell<ABrush>>>,
+    pub brush_id: Option<usize>,
     /// Material.
     //material: Rc<UMaterial>,
     /// Item name.
@@ -166,6 +163,7 @@ impl FPoly {
 
     pub fn from_vertices(vertices: &[FVector]) -> Self {
         let mut fpoly = FPoly::new();
+        // TODO: this fails when there are more verts than can be added.
         _ = fpoly.vertices.try_extend_from_slice(vertices);
         fpoly.base = fpoly.vertices[0];  // TODO: the selection of the base vertex seems arbitrary
         _ = fpoly.calc_normal();
@@ -189,7 +187,7 @@ impl FPoly {
             texture_v: FVector { x: 0.0, y: 0.0, z: 0.0 },
             vertices: Default::default(),
             poly_flags: EPolyFlags::from_bits_retain(0),
-            actor: None,
+            brush_id: None,
             link: Some(0),
             brush_poly_index: None,
             save_poly_index: None,

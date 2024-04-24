@@ -244,7 +244,7 @@ pub fn bsp_add_node(model: &mut UModel, mut parent_node_index: Option<usize>, no
         surf.texture_u_index = model.bsp_add_vector(ed_poly.texture_u, false);
         surf.texture_v_index = model.bsp_add_vector(ed_poly.texture_v, false);
         // Surf->Material = EdPoly->Material;
-        // Surf->Actor = EdPoly->Actor;
+        surf.brush_id = ed_poly.brush_id.unwrap();
         surf.poly_flags = ed_poly.poly_flags & !EPolyFlags::NoAddToBSP;
         surf.light_map_scale = ed_poly.light_map_scale;
         surf.brush_polygon_index = ed_poly.brush_poly_index;
@@ -498,7 +498,7 @@ fn filter_leaf(filter_func: BspFilterFunc, model: &mut UModel, node_index: usize
 // in order to handle coplanar CSG properly.
 fn filter_ed_poly(filter_func: BspFilterFunc, model: &mut UModel, mut node_index: usize, ed_poly: &mut FPoly, mut coplanar_info: FCoplanarInfo, mut outside: bool, filter_context: &mut FilterContext) {
     loop {
-        if ed_poly.vertices.len() > FPOLY_VERTEX_THRESHOLD {
+        if ed_poly.vertices.len() >= FPOLY_VERTEX_THRESHOLD {
             // Split EdPoly in half to prevent vertices from overflowing.
             if let Some(mut temp) = ed_poly.split_in_half() {
                 filter_ed_poly(filter_func, model, node_index, &mut temp, coplanar_info, outside, filter_context);
@@ -533,8 +533,6 @@ fn filter_ed_poly(filter_func: BspFilterFunc, model: &mut UModel, mut node_index
                 }
             }
             ESplitType::Coplanar => {
-                println!("coplanar!");
-
                 if coplanar_info.original_node.is_some() {
                     // This will happen once in a blue moon when a polygon is barely outside the
                     // coplanar threshold and is split up into a new polygon that is
@@ -683,17 +681,8 @@ pub fn bsp_merge_coplanars(model: &mut UModel, should_remap_links: bool, should_
     // Mark all polys as unprocessed.
     model.polys.iter_mut().for_each(|poly| poly.poly_flags.remove(EPolyFlags::EdProcessed));
 
-    println!("BspMergeCoplanars: {} polys", model.polys.len());
-
     // Find matching coplanars and merge them.
     let mut poly_list: Vec<usize> = vec![0; model.polys.len()];
-
-    println!("Length of poly_list: {}", poly_list.len());
-
-    // Print out all the vertices for each poly.
-    for (i, poly) in model.polys.iter().enumerate() {
-        println!("Poly {} vertices: {:?}", i, poly.vertices);
-    }
 
     let mut n = 0;
 
@@ -819,7 +808,7 @@ fn bsp_node_to_fpoly(model: &UModel, node_index: usize) -> Option<FPoly> {
     ed_poly.poly_flags &= !(EPolyFlags::EdCut | EPolyFlags::EdProcessed | EPolyFlags::Selected | EPolyFlags::Memorized);
     ed_poly.link = Some(node.surface_index);
     //ed_poly.material = poly.material;
-    //ed_poly.actor = poly.actor;
+    ed_poly.brush_id = Some(poly.brush_id);
     ed_poly.brush_poly_index = poly.brush_polygon_index;
 
     // TODO: item name crap
@@ -882,10 +871,6 @@ pub struct FilterContext<'a> {
 
 /// Filter all relevant world polys through the brush.
 fn filter_world_through_brush(model: &mut UModel, brush: &mut UModel, csg_operation: ECsgOper, mut node_index: usize, brush_sphere: FSphere) {
-    if csg_operation == ECsgOper::Add {
-        println!("filter_world_through_brush: node_index = {}", node_index);
-    }
-
     // Loop through all coplanars.
     loop {
         // Get surface.
@@ -893,7 +878,6 @@ fn filter_world_through_brush(model: &mut UModel, brush: &mut UModel, csg_operat
 
         // Skip new nodes and their children, which are guaranteeed new.
         if model.nodes[node_index].node_flags.contains(EBspNodeFlags::IsNew) {
-            println!("filter_world_through_brush: skipping new node");
             return
         }
 
@@ -906,7 +890,7 @@ fn filter_world_through_brush(model: &mut UModel, brush: &mut UModel, csg_operat
         // Process only polys that aren't empty.
         if do_front && do_back {
             if let Some(mut temp_ed_poly) = bsp_node_to_fpoly(model, node_index) {
-                //temp_ed_poly.actor = model.surfaces[surface_index].actor;
+                temp_ed_poly.brush_id = Some(model.surfaces[surface_index].brush_id);
                 temp_ed_poly.brush_poly_index = model.surfaces[surface_index].brush_polygon_index;
 
                 // Find last coplanar in chain.
@@ -938,9 +922,6 @@ fn filter_world_through_brush(model: &mut UModel, brush: &mut UModel, csg_operat
                     filter_context.model.nodes[filter_context.last_coplanar_node_index].plane_index = None;
                     filter_context.model.nodes.truncate(node_count);
                 } else {
-
-                    println!("original world poly tagged for deletion, {} fragments added", filter_context.discarded);
-
 					// Tag original world poly for deletion; has been deleted or replaced by partial fragments.
                     filter_context.model.nodes[filter_context.node_index].vertex_count = 0;
                 }
@@ -1004,7 +985,7 @@ pub fn bsp_brush_csg(
         assert!(brush.polys[poly_index].link.is_none() || brush.polys[poly_index].link.unwrap() < brush.polys.len());
 
         // Set its backward brush link.
-        // dest_ed_poly.actor = Some(actor_copy.clone());
+        dest_ed_poly.brush_id = Some(actor.id);
         dest_ed_poly.brush_poly_index = Some(poly_index);
 
         // Update its flags.
@@ -1078,8 +1059,6 @@ pub fn bsp_brush_csg(
         
         // Does the sphere get modified here?
         let brush_sphere = temp_model.bounding_sphere.clone();
-
-        println!("Bounding sphere: {:?}", brush_sphere);
 
         filter_world_through_brush(model, &mut temp_model, csg_operation, 0, brush_sphere);
     }

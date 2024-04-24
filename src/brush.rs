@@ -7,6 +7,8 @@ use crate::coords::{FCoords, FModelCoords};
 #[derive(Debug, PartialEq)]
 pub struct ABrush {
     pub model: UModel,
+    pub id: usize,
+    pub name: String,
     pub location: FVector,
     pub pre_pivot: FVector,
     pub poly_flags: EPolyFlags,
@@ -15,13 +17,15 @@ pub struct ABrush {
 
 impl ABrush {
     // TODO: consider just nuking the location & prepivot and expect the user to pass in the world-space polys.
-    pub fn new(polys: &[FPoly], location: FVector, poly_flags: EPolyFlags, csg_operation: ECsgOper) -> Self {
+    pub fn new(id: usize, name: String, polys: &[FPoly], poly_flags: EPolyFlags, csg_operation: ECsgOper) -> Self {
         let mut model = UModel::new(true);
         model.polys = polys.to_vec();
         bsp_validate_brush(&mut model, false);
         ABrush {
+            id,
+            name,
             model,
-            location,
+            location: FVector::new(0.0, 0.0, 0.0),
             pre_pivot: FVector::new(0.0, 0.0, 0.0),
             poly_flags,
             csg_operation,

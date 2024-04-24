@@ -62,6 +62,8 @@ pub struct FBspSurf {
     pub texture_u_index: usize,
     /// Texture V-vector index.
     pub texture_v_index: usize,
+    // BDK: Brush ID
+    pub brush_id: usize,
     /// Editor brush polygon index.
     pub brush_polygon_index: Option<usize>,
     /// Nodes which make up this surface
@@ -76,6 +78,7 @@ impl Default for FBspSurf {
     fn default() -> Self {
         FBspSurf {
             poly_flags: EPolyFlags::empty(),
+            brush_id: 0,
             base_point_index: 0,
             normal_index: 0,
             texture_u_index: 0,

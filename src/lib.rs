@@ -58,6 +58,8 @@ impl From<&str> for CsgOperation {
 
 #[pyclass]
 struct Brush {
+    id: usize,
+    name: String,
     polys: Vec<Poly>,
     poly_flags: HashSet<String>,
     csg_operation: CsgOperation,
@@ -104,8 +106,9 @@ impl From<&PyRef<'_, Brush>> for crate::brush::ABrush {
     fn from(brush: &PyRef<Brush>) -> Self {
         let polys: Vec<FPoly> = brush.polys.iter().map(|poly| FPoly::from(poly)).collect();
         crate::brush::ABrush::new(
+            brush.id,
+            brush.name.clone(),
             polys.as_slice(),
-            math::FVector::new(0.0, 0.0, 0.0),
             EPolyFlags::from(&brush.poly_flags),
             brush.csg_operation.into())
     }
@@ -114,13 +117,13 @@ impl From<&PyRef<'_, Brush>> for crate::brush::ABrush {
 #[pymethods]
 impl Brush {
     #[new]
-    fn new(polys: Vec<PyRef<Poly>>, poly_flags: HashSet<String>, csg_operation: &str) -> Self {
+    fn new(id: usize, name: String, polys: Vec<PyRef<Poly>>, poly_flags: HashSet<String>, csg_operation: &str) -> Self {
         // Create a copy of the polys and pass them to the brush.
         let polys: Vec<Poly> = polys.iter().map(|poly|
             Poly { vertices: poly.vertices.clone() }
         ).collect();
 
-        Brush { polys, poly_flags, csg_operation: CsgOperation::from(csg_operation) }
+        Brush { id, name, polys, poly_flags, csg_operation: CsgOperation::from(csg_operation) }
     }
 }
 
@@ -134,11 +137,27 @@ impl From<&Poly> for FPoly {
 #[pyclass]
 #[derive(Clone, Copy, Debug)]
 struct BspSurface {
+    #[pyo3(get)]
+    pub normal_index: usize,
+    #[pyo3(get)]
+    pub texture_u_index: usize,
+    #[pyo3(get)]
+    pub texture_v_index: usize,
+    #[pyo3(get)]
+    pub brush_id: usize,
+    #[pyo3(get)]
+    pub brush_polygon_index: usize,
 }
 
 impl From<&FBspSurf> for BspSurface {
     fn from(surface: &FBspSurf) -> Self {
-        BspSurface {}
+        BspSurface {
+            normal_index: surface.normal_index,
+            texture_u_index: surface.texture_u_index,
+            texture_v_index: surface.texture_v_index,
+            brush_id: surface.brush_id,
+            brush_polygon_index: surface.brush_polygon_index.unwrap(),
+        }
     }
 }
 
@@ -216,24 +235,10 @@ fn csg_rebuild(brushes: Vec<PyRef<Brush>>) -> PyResult<Model> {
     // Convert the Brushes to ABrushes and add them to the level brush list.
     let brushes: Vec<crate::brush::ABrush> = brushes.iter().map(|brush| brush.into()).collect();
 
-    println!("Brushes: {:?}", brushes.len());
-
     let mut level = ULevel::new(brushes);
-
-    // Print debug info on the brushes.
-    for brush in &level.brushes {
-        brush.model.polys.iter().for_each(|poly| {
-            println!("Poly: {:?}", poly.vertices);
-        });
-    }
 
     // Rebuild the CSG.
     csg_rebuild(&mut level);
-
-    // TODO: dump the level geometry to an object and return it.
-    println!("Number of nodes: {}", level.model.nodes.len());
-    println!("Number of polys: {}", level.model.polys.len());
-    println!("Number of surfaces: {}", level.model.surfaces.len());
     
     Ok(Model::from(&level.model))
 }

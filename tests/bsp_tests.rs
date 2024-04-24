@@ -299,13 +299,9 @@ fn bsp_brush_subtract_and_add_test() {
 
     // Create the main subtraction brush.
     let polys = create_cube_polys(FVector::new(0.0, 0.0, 0.0), FVector::new(1.0, 1.0, 1.0));
-    let mut subtraction_brush = ABrush {
-        model: UModel::new_from_polys(&polys),
-        location: FVector::new(0.0, 0.0, 0.0),
-        pre_pivot: FVector::new(0.0, 0.0, 0.0),
-        csg_operation: bdk_py::bsp::ECsgOper::Subtract,
-        poly_flags: EPolyFlags::empty(),
-    };
+    let mut subtraction_brush = ABrush::new(
+        0, "Brush.001".to_string(), &polys, EPolyFlags::empty(), bdk_py::bsp::ECsgOper::Subtract
+    );
     bsp_validate_brush(&mut subtraction_brush.model, false);
 
     // TODO: all the normals are flipped on the addition brush...
@@ -316,13 +312,14 @@ fn bsp_brush_subtract_and_add_test() {
     for poly in polys.iter_mut() {
         poly.normal = -poly.normal;
     }
-    let mut addition_brush = ABrush {
-        model: UModel::new_from_polys(&polys),
-        location: FVector::new(0.0, 0.0, 0.0),
-        pre_pivot: FVector::new(0.0, 0.0, 0.0),
-        csg_operation: bdk_py::bsp::ECsgOper::Add,
-        poly_flags: EPolyFlags::empty(),
-    };
+    let mut addition_brush = ABrush::new(
+        0, 
+        "Brush.001".to_string(), 
+        &polys, 
+        EPolyFlags::empty(), 
+        bdk_py::bsp::ECsgOper::Add
+    );
+
     bsp_validate_brush(&mut addition_brush.model, false);
 
     // Act
@@ -339,14 +336,13 @@ fn bsp_brush_subtract_and_add_test() {
 fn bsp_brush_csg_subtract_test() {
     // Arrange
     let mut model = UModel::new(false);
-    let polys = create_cube_polys(FVector::new(0.0, 0.0, 0.0), FVector::new(1.0, 1.0, 1.0));
-    let mut brush = ABrush {
-        model: UModel::new_from_polys(&polys),
-        location: FVector::new(5.0, 0.0, 0.0),
-        pre_pivot: FVector::new(0.0, 0.0, 0.0),
-        csg_operation: bdk_py::bsp::ECsgOper::Subtract,
-        poly_flags: EPolyFlags::empty(),
-    };
+    let mut brush = ABrush::new(
+        0, 
+        "Brush.001".to_string(), 
+        &create_cube_polys(FVector::new(0.0, 0.0, 0.0), FVector::new(1.0, 1.0, 1.0)), 
+        EPolyFlags::empty(), 
+        bdk_py::bsp::ECsgOper::Subtract
+    );
 
     bsp_validate_brush(&mut brush.model, false);
 
@@ -360,18 +356,15 @@ fn bsp_brush_csg_subtract_test() {
 
 #[test]
 fn bsp_merge_coplanars_test() {
-    // TODO: make a more substantive test, this was just made to make sure it doesn't crash.
-
     // Arrange
     let mut model = UModel::new(false);
-    let polys = create_cube_polys(FVector::new(0.0, 0.0, 0.0), FVector::new(1.0, 1.0, 1.0));
-    let mut brush = ABrush {
-        model: UModel::new_from_polys(&polys),
-        location: FVector::new(0.0, 0.0, 0.0),
-        pre_pivot: FVector::new(0.0, 0.0, 0.0),
-        csg_operation: bdk_py::bsp::ECsgOper::Subtract,
-        poly_flags: EPolyFlags::empty(),
-    };
+    let mut brush = ABrush::new(
+        0,
+         "Brush.001".to_string(),
+         &create_cube_polys(FVector::new(0.0, 0.0, 0.0), FVector::new(1.0, 1.0, 1.0)),
+         EPolyFlags::empty(),
+         bdk_py::bsp::ECsgOper::Subtract
+        );
 
     bsp_validate_brush(&mut brush.model, false);
     bsp_brush_csg(&brush, &mut model, EPolyFlags::empty(), bdk_py::bsp::ECsgOper::Subtract, false);
