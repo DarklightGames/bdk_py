@@ -292,29 +292,6 @@ fn bsp_add_node_root_node() {
     assert!(model.nodes.len() == 1); 
 }
 
-fn output_obj(model: &UModel, path: &str) {
-    // Output the surfaces to an OBJ file for debugging.
-    if let Ok(mut obj) = std::fs::File::create(path) {
-        for point in &model.points {
-            obj.write(format!("v {} {} {}\n", point.x, point.y, point.z).as_bytes());
-        }
-    
-        for node in &model.nodes {
-            if node.vertex_count == 0 {
-                continue;
-            }
-    
-            let vertices = &model.vertices[node.vertex_pool_index..node.vertex_pool_index + node.vertex_count];
-            let point_indices = vertices.iter().map(|vertex| vertex.vertex_index).collect::<Vec<usize>>();
-            let face_indices = &point_indices.iter().map(|i| (i + 1).to_string()).collect::<Vec<String>>().join(" ");
-    
-            obj.write(format!("f {}\n", face_indices).as_bytes());
-        }
-    } else {
-        println!("Failed to create OBJ file.");
-    }
-}
-
 #[test]
 fn bsp_brush_subtract_and_add_test() {
     // Arrange
@@ -350,14 +327,12 @@ fn bsp_brush_subtract_and_add_test() {
 
     // Act
     bsp_brush_csg(&subtraction_brush, &mut model, EPolyFlags::empty(), bdk_py::bsp::ECsgOper::Subtract, false);
-
-    // model.is_root_outside = true;
-
-    // addition_brush.model.is_root_outside = false;
-
     bsp_brush_csg(&addition_brush, &mut model, EPolyFlags::empty(), bdk_py::bsp::ECsgOper::Add, false);
 
-    output_obj(&model, "subtract_and_add.obj");
+    // Assert
+    assert_eq!(model.nodes.len(), 12);
+    assert_eq!(model.surfaces.len(), 9);
+
 }
 
 #[test]
@@ -381,8 +356,6 @@ fn bsp_brush_csg_subtract_test() {
     // Assert
     assert_eq!(model.nodes.len(), 6);
     assert_eq!(model.surfaces.len(), 6);
-
-    output_obj(&model, "subtract.obj");
 }
 
 #[test]
