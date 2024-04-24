@@ -10,14 +10,14 @@ pub mod coords;
 pub mod brush;
 pub mod csg;
 
-use std::{borrow::Borrow, collections::HashSet};
-
-use fpoly::EPolyFlags;
+use std::collections::HashSet;
+use fpoly::{EPolyFlags, FPOLY_MAX_VERTICES, FPOLY_VERTEX_THRESHOLD};
 use model::{FBspNode, FBspSurf, FVert, UModel};
 use pyo3::prelude::*;
 use crate::fpoly::FPoly;
 
 #[pyclass]
+#[derive(Clone)]
 struct Poly {
     vertices: Vec<(f32, f32, f32)>
 }
@@ -27,6 +27,23 @@ impl Poly {
     #[new]
     fn new(vertices: Vec<(f32, f32, f32)>) -> Self {
         Poly { vertices }
+    }
+
+    fn split(&mut self) -> Option<Poly> {
+        // If the poly has less than 8 vertices, we don't need to split it.
+        // This is more or less identical to FPoly::split_in_half.
+        if self.vertices.len() < FPOLY_MAX_VERTICES {
+            return None;
+        }
+
+        let mut other_half = self.clone();
+
+        self.vertices.truncate(FPOLY_VERTEX_THRESHOLD);
+        other_half.vertices.drain(0..FPOLY_VERTEX_THRESHOLD);
+        other_half.vertices.push(self.vertices[0]);
+
+        Some(other_half)
+
     }
 }
 
@@ -63,6 +80,21 @@ struct Brush {
     polys: Vec<Poly>,
     poly_flags: HashSet<String>,
     csg_operation: CsgOperation,
+}
+
+impl Brush {
+    pub(crate) fn ensure_polys(&mut self) {
+        let mut poly_stack = self.polys.clone();
+        poly_stack.reverse();
+        self.polys.clear();
+        while let Some(mut poly) = poly_stack.pop() {
+            let split_result = poly.split();
+            self.polys.push(poly);
+            if let Some(other_half) = split_result {
+                poly_stack.push(other_half);
+            }
+        }
+    }
 }
 
 // Create a static string has mapping EPolyFlags, where the string is in SCREAMING_SNAKE_CASE.
@@ -104,13 +136,52 @@ impl From<&HashSet<String>> for EPolyFlags {
 
 impl From<&PyRef<'_, Brush>> for crate::brush::ABrush {
     fn from(brush: &PyRef<Brush>) -> Self {
-        let polys: Vec<FPoly> = brush.polys.iter().map(|poly| FPoly::from(poly)).collect();
+        // Incoming polys may have more than the maximum number of vertices.
+        // Therefore, we need to split the large polys into smaller ones.
+        // Try to split all of the polys, recursively.
+        let mut brush_poly_stack = brush.polys.clone();
+        brush_poly_stack.reverse();
+        let mut brush_polys: Vec<Poly> = Vec::new();
+        while let Some(mut poly) = brush_poly_stack.pop() {
+            match poly.split() {
+                Some(other_half) => {
+                    brush_polys.push(poly);
+                    brush_poly_stack.push(other_half);
+                },
+                None => {
+                    brush_polys.push(poly);
+                }
+            }
+        }
+
+        let polys: Vec<FPoly> = brush_polys.iter().map(|poly| FPoly::from(poly)).collect();
+
         crate::brush::ABrush::new(
             brush.id,
             brush.name.clone(),
             polys.as_slice(),
             EPolyFlags::from(&brush.poly_flags),
             brush.csg_operation.into())
+    }
+}
+
+#[test]
+fn brush_ensure_polys_test() {
+    // Create a 32-sided circle polygon.
+    for i in 3..33 {
+        let mut vertices: Vec<(f32, f32, f32)> = Vec::new();
+        for j in 0..i {
+            let angle = 2.0 * std::f32::consts::PI * j as f32 / i as f32;
+            vertices.push((angle.cos(), angle.sin(), 0.0));
+        }
+        let poly = Poly { vertices };
+        let mut brush = Brush { id: 0, name: "Test".to_string(), polys: vec![poly], poly_flags: HashSet::new(), csg_operation: CsgOperation::Add };
+        brush.ensure_polys();
+        
+        // None of the polys should be degenerate.
+        for (j, poly) in brush.polys.iter().enumerate() {
+            assert!(poly.vertices.len() >= 3, "Shape with {} verts, split poly {} has less than 3 vertices", i, j);
+        }
     }
 }
 
