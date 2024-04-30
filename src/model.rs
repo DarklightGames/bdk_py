@@ -64,6 +64,8 @@ pub struct FBspSurf {
     pub texture_v_index: usize,
     // BDK: Brush ID
     pub brush_id: usize,
+    // BDK: Material index
+    pub material_index: usize,
     /// Editor brush polygon index.
     pub brush_polygon_index: Option<usize>,
     /// Nodes which make up this surface
@@ -84,6 +86,7 @@ impl Default for FBspSurf {
             texture_u_index: 0,
             texture_v_index: 0,
             brush_polygon_index: None,
+            material_index: 0,
             node_indices: Vec::new(),
             plane: FPlane::new(),
             light_map_scale: 0.0
@@ -247,6 +250,7 @@ pub struct UModel {
     pub bounding_box: FBox,
     pub linked: bool,
     pub is_root_outside: bool,
+    pub num_shared_sides: usize,
 }
 
 impl UModel {
@@ -274,6 +278,7 @@ impl UModel {
             bounding_box: FBox::default(),
             linked: false,
             is_root_outside,
+            num_shared_sides: 0,
         }
     }
 

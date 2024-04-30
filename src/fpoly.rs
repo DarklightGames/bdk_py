@@ -133,9 +133,7 @@ pub struct FPoly {
     /// Brush where this originated, or NULL.
     pub brush_id: Option<usize>,
     /// Material.
-    //material: Rc<UMaterial>,
-    /// Item name.
-    //item_name: FName,
+    pub material_index: usize,
     /// iBspSurf, or brush fpoly index of first identical polygon, or MAXWORD.
     pub link: Option<usize>,
     /// Index of editor solid's polygon this originated from.
@@ -188,6 +186,7 @@ impl FPoly {
             vertices: Default::default(),
             poly_flags: EPolyFlags::from_bits_retain(0),
             brush_id: None,
+            material_index: 0,
             link: Some(0),
             brush_poly_index: None,
             save_poly_index: None,

@@ -19,14 +19,19 @@ use crate::fpoly::FPoly;
 #[pyclass]
 #[derive(Clone)]
 struct Poly {
-    vertices: Vec<(f32, f32, f32)>
+    vertices: Vec<(f32, f32, f32)>,
+    origin: (f32, f32, f32),
+    texture_u: (f32, f32, f32),
+    texture_v: (f32, f32, f32),
+    poly_flags: HashSet<String>,
+    material_index: usize,
 }
 
 #[pymethods]
 impl Poly {
     #[new]
-    fn new(vertices: Vec<(f32, f32, f32)>) -> Self {
-        Poly { vertices }
+    fn new(vertices: Vec<(f32, f32, f32)>, origin: (f32, f32, f32), texture_u: (f32, f32, f32), texture_v: (f32, f32, f32), poly_flags: HashSet<String>, material_index: usize) -> Self {
+        Poly { vertices, origin, texture_u, texture_v, poly_flags, material_index }
     }
 
     fn split(&mut self) -> Option<Poly> {
@@ -35,9 +40,7 @@ impl Poly {
         }
         let mut other_half = self.clone();
         self.vertices.truncate(FPOLY_VERTEX_THRESHOLD);
-        println!("self.vertices.len() = {}", self.vertices.len());
         other_half.vertices.drain(1..FPOLY_VERTEX_THRESHOLD - 1);
-        println!("other_half.vertices.len() = {}", other_half.vertices.len());
         Some(other_half)
     }
 }
@@ -48,7 +51,7 @@ fn create_circle_poly(num_verts: usize) -> Poly {
         let angle = 2.0 * std::f32::consts::PI * i as f32 / num_verts as f32;
         vertices.push((angle.cos(), angle.sin(), 0.0));
     }
-    Poly { vertices }
+    Poly { vertices, origin: (0.0, 0.0, 0.0), texture_u: (1.0, 0.0, 0.0), texture_v: (0.0, 1.0, 0.0), poly_flags: HashSet::new(), material_index: 0}
 }
 
 #[test]
@@ -203,7 +206,14 @@ impl Brush {
     fn new(id: usize, name: String, polys: Vec<PyRef<Poly>>, poly_flags: HashSet<String>, csg_operation: &str) -> Self {
         // Create a copy of the polys and pass them to the brush.
         let polys: Vec<Poly> = polys.iter().map(|poly|
-            Poly { vertices: poly.vertices.clone() }
+            Poly {
+                vertices: poly.vertices.clone(),
+                origin: poly.origin,
+                texture_u: poly.texture_u,
+                texture_v: poly.texture_v,
+                poly_flags: poly.poly_flags.clone(),
+                material_index: poly.material_index,
+            }
         ).collect();
 
         Brush { id, name, polys, poly_flags, csg_operation: CsgOperation::from(csg_operation) }
@@ -213,13 +223,23 @@ impl Brush {
 impl From<&Poly> for FPoly {
     fn from(poly: &Poly) -> Self {
         let vertices: Vec<math::FVector> = poly.vertices.iter().map(|(x, y, z)| math::FVector::new(*x, *y, *z)).collect();
-        FPoly::from_vertices(&vertices)
+        let mut fpoly = FPoly::new();
+        fpoly.vertices.extend(vertices);
+        fpoly.base = math::FVector::new(poly.origin.0, poly.origin.1, poly.origin.2);
+        fpoly.texture_u = math::FVector::new(poly.texture_u.0, poly.texture_u.1, poly.texture_u.2);
+        fpoly.texture_v = math::FVector::new(poly.texture_v.0, poly.texture_v.1, poly.texture_v.2);
+        fpoly.material_index = poly.material_index;
+        _ = fpoly.calc_normal();
+        fpoly.poly_flags = (&poly.poly_flags).into();
+        fpoly
     }
 }
 
 #[pyclass]
 #[derive(Clone, Copy, Debug)]
 struct BspSurface {
+    #[pyo3(get)]
+    pub base_point_index: usize,
     #[pyo3(get)]
     pub normal_index: usize,
     #[pyo3(get)]
@@ -229,17 +249,21 @@ struct BspSurface {
     #[pyo3(get)]
     pub brush_id: usize,
     #[pyo3(get)]
+    pub material_index: usize,
+    #[pyo3(get)]
     pub brush_polygon_index: usize,
 }
 
 impl From<&FBspSurf> for BspSurface {
     fn from(surface: &FBspSurf) -> Self {
         BspSurface {
+            base_point_index: surface.base_point_index,
             normal_index: surface.normal_index,
             texture_u_index: surface.texture_u_index,
             texture_v_index: surface.texture_v_index,
             brush_id: surface.brush_id,
             brush_polygon_index: surface.brush_polygon_index.unwrap(),
+            material_index: surface.material_index,
         }
     }
 }
@@ -250,7 +274,7 @@ struct Vertex {
     #[pyo3(get)]
     pub vertex_index: usize,
     #[pyo3(get)]
-    pub side_index: Option<usize>,
+    pub side_index: Option<usize>,  // TODO: this is actually the edge, not "side".
 }
 
 impl From<&FVert> for Vertex {
@@ -293,6 +317,8 @@ struct Model {
     pub surfaces: Vec<BspSurface>,
     #[pyo3(get)]
     pub vertices: Vec<Vertex>,
+    #[pyo3(get)]
+    pub vectors: Vec<(f32, f32, f32)>,
 }
 
 impl From<&UModel> for Model {
@@ -301,11 +327,13 @@ impl From<&UModel> for Model {
         let nodes: Vec<BspNode> = model.nodes.iter().map(|node| BspNode::from(node)).collect();
         let surfaces: Vec<BspSurface> = model.surfaces.iter().map(|surface| BspSurface::from(surface)).collect();
         let vertices: Vec<Vertex> = model.vertices.iter().map(|vert| Vertex::from(vert)).collect();
+        let vectors: Vec<(f32, f32, f32)> = model.vectors.iter().map(|vector| (vector.x, vector.y, vector.z)).collect();
         Model {
             points,
             nodes,
             surfaces,
             vertices,
+            vectors,
         }
     }
 }

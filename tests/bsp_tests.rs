@@ -281,6 +281,7 @@ fn bsp_add_node_root_node() {
         FVector::new(1.0, 0.0, 0.0),
         FVector::new(1.0, 1.0, 0.0),
     ]);
+    poly.brush_id = Some(0);
 
     bsp_add_node(&mut model, 
         None, 
