@@ -11,7 +11,8 @@ pub mod brush;
 pub mod csg;
 
 use std::collections::HashSet;
-use fpoly::{EPolyFlags, FPOLY_MAX_VERTICES, FPOLY_VERTEX_THRESHOLD};
+use bitflags::Flags;
+use fpoly::{EPolyFlags, FPOLY_VERTEX_THRESHOLD};
 use model::{FBspNode, FBspSurf, FVert, UModel};
 use pyo3::prelude::*;
 use crate::fpoly::FPoly;
@@ -252,6 +253,10 @@ struct BspSurface {
     pub material_index: usize,
     #[pyo3(get)]
     pub brush_polygon_index: usize,
+    #[pyo3(get)]
+    pub poly_flags: u32,
+    #[pyo3(get)]
+    pub light_map_scale: f32,
 }
 
 impl From<&FBspSurf> for BspSurface {
@@ -264,6 +269,8 @@ impl From<&FBspSurf> for BspSurface {
             brush_id: surface.brush_id,
             brush_polygon_index: surface.brush_polygon_index.unwrap(),
             material_index: surface.material_index,
+            poly_flags: surface.poly_flags.bits(),
+            light_map_scale: surface.light_map_scale,
         }
     }
 }

@@ -66,10 +66,13 @@ pub fn csg_rebuild(level: &mut ULevel) {
         }
     }
 
-    return ();
 
     // Repartition the structural BSP.
-    //bsp_repartition(&mut level.model, 0, false);
+    bsp_repartition(&mut level.model, 0, false);
+
+    
+    return ();
+
     // test_visibility(level, level.model, 0, false);  // TODO: borrowing issues here obviously.
 
     // Remember leaves
