@@ -11,7 +11,7 @@ pub mod brush;
 pub mod csg;
 
 use std::collections::HashSet;
-use bitflags::Flags;
+use bsp::EBspOptimization;
 use fpoly::{EPolyFlags, FPOLY_VERTEX_THRESHOLD};
 use model::{FBspNode, FBspSurf, FVert, UModel};
 use pyo3::prelude::*;
@@ -133,6 +133,26 @@ impl Brush {
     }
 }
 
+#[pymethods]
+impl Brush {
+    #[new]
+    fn new(id: usize, name: String, polys: Vec<PyRef<Poly>>, poly_flags: HashSet<String>, csg_operation: &str) -> Self {
+        // Create a copy of the polys and pass them to the brush.
+        let polys: Vec<Poly> = polys.iter().map(|poly|
+            Poly {
+                vertices: poly.vertices.clone(),
+                origin: poly.origin,
+                texture_u: poly.texture_u,
+                texture_v: poly.texture_v,
+                poly_flags: poly.poly_flags.clone(),
+                material_index: poly.material_index,
+            }
+        ).collect();
+
+        Brush { id, name, polys, poly_flags, csg_operation: CsgOperation::from(csg_operation) }
+    }
+}
+
 // Create a static string has mapping EPolyFlags, where the string is in SCREAMING_SNAKE_CASE.
 static POLY_FLAGS: phf::Map<&'static str, u32> = phf::phf_map! {
     "INVISIBLE" => 0x00000001,
@@ -198,26 +218,6 @@ impl From<&PyRef<'_, Brush>> for crate::brush::ABrush {
             polys.as_slice(),
             EPolyFlags::from(&brush.poly_flags),
             brush.csg_operation.into())
-    }
-}
-
-#[pymethods]
-impl Brush {
-    #[new]
-    fn new(id: usize, name: String, polys: Vec<PyRef<Poly>>, poly_flags: HashSet<String>, csg_operation: &str) -> Self {
-        // Create a copy of the polys and pass them to the brush.
-        let polys: Vec<Poly> = polys.iter().map(|poly|
-            Poly {
-                vertices: poly.vertices.clone(),
-                origin: poly.origin,
-                texture_u: poly.texture_u,
-                texture_v: poly.texture_v,
-                poly_flags: poly.poly_flags.clone(),
-                material_index: poly.material_index,
-            }
-        ).collect();
-
-        Brush { id, name, polys, poly_flags, csg_operation: CsgOperation::from(csg_operation) }
     }
 }
 
@@ -328,6 +328,42 @@ struct Model {
     pub vectors: Vec<(f32, f32, f32)>,
 }
 
+impl TryFrom<&str> for EBspOptimization {
+    type Error = &'static str;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "LAME" => Ok(EBspOptimization::Lame),
+            "GOOD" => Ok(EBspOptimization::Good),
+            "OPTIMAL" => Ok(EBspOptimization::Optimal),
+            _ => Err("Invalid value, must be one of [LAME, GOOD, OPTIMAL]")
+        }
+    }
+}
+
+impl ToString for EBspOptimization {
+    fn to_string(&self) -> String {
+        match self {
+            EBspOptimization::Lame => "LAME".to_string(),
+            EBspOptimization::Good => "GOOD".to_string(),
+            EBspOptimization::Optimal => "OPTIMAL".to_string(),
+        }
+    }
+}
+
+impl IntoPy<PyObject> for EBspOptimization {
+    fn into_py(self, py: Python) -> PyObject {
+        self.to_string().into_py(py)
+    }
+}
+
+impl FromPyObject<'_> for EBspOptimization {
+    fn extract(ob: &PyAny) -> PyResult<Self> {
+        let string = ob.extract::<String>()?;
+        EBspOptimization::try_from(string.as_str()).map_err(|_| PyErr::new::<pyo3::exceptions::PyValueError, _>("Invalid optimization value"))
+    }
+}
+
 impl From<&UModel> for Model {
     fn from(model: &UModel) -> Self {
         let points: Vec<(f32, f32, f32)> = model.points.iter().map(|point| (point.x, point.y, point.z)).collect();
@@ -345,9 +381,54 @@ impl From<&UModel> for Model {
     }
 }
 
+#[pyclass]
+#[derive(Clone)]
+struct BspBuildOptions {
+    #[pyo3(get, set)]
+    pub do_geometry: bool,
+    #[pyo3(get, set)]
+    pub do_bsp: bool,
+    #[pyo3(get, set)]
+    pub do_lighting: bool,
+    #[pyo3(get, set)]
+    pub dither_lightmaps: bool,
+    #[pyo3(get, set)]
+    pub lightmap_format: String,
+    #[pyo3(get, set)]
+    pub bsp_optimization: EBspOptimization,
+    #[pyo3(get, set)]
+    pub bsp_balance: i32,
+    #[pyo3(get, set)]
+    pub bsp_portal_bias: i32,
+}
+
+impl Default for BspBuildOptions {
+    fn default() -> Self {
+        BspBuildOptions {
+            do_geometry: true,
+            do_bsp: true,
+            do_lighting: true,
+            dither_lightmaps: true,
+            lightmap_format: "RGB8".to_string(),
+            bsp_optimization: EBspOptimization::Lame,
+            bsp_balance: 15,
+            bsp_portal_bias: 70,
+            
+        }
+    }
+}
+
+#[pymethods]
+impl BspBuildOptions {
+    #[new]
+    fn new() -> Self {
+        BspBuildOptions::default()
+    }
+}
+
 /// Formats the sum of two numbers as string.
 #[pyfunction]
-fn csg_rebuild(brushes: Vec<PyRef<Brush>>) -> PyResult<Model> {
+fn csg_rebuild(brushes: Vec<PyRef<Brush>>, options: BspBuildOptions) -> PyResult<Model> {
     use crate::csg::{ULevel, csg_rebuild};
 
     // Convert the Brushes to ABrushes and add them to the level brush list.
@@ -369,6 +450,7 @@ fn bdk_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Vertex>()?;
     m.add_class::<BspSurface>()?;
     m.add_class::<BspNode>()?;
+    m.add_class::<BspBuildOptions>()?;
     m.add_function(wrap_pyfunction!(csg_rebuild, m)?)?;
     Ok(())
 }

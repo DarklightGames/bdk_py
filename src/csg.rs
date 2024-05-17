@@ -66,12 +66,8 @@ pub fn csg_rebuild(level: &mut ULevel) {
         }
     }
 
-
     // Repartition the structural BSP.
     bsp_repartition(&mut level.model, 0, false);
-
-    
-    return ();
 
     // test_visibility(level, level.model, 0, false);  // TODO: borrowing issues here obviously.
 
@@ -81,6 +77,8 @@ pub fn csg_rebuild(level: &mut ULevel) {
     if level.model.nodes.is_empty() {
         enlist_leaves(&level.model, &mut front_node_indices, &mut back_node_indices);
     }
+
+    return ();
 
     // Compose all detail brushes.
     for brush in &level.brushes {
