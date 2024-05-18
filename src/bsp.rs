@@ -8,7 +8,8 @@ use crate::brush::ABrush;
 use crate::sphere::FSphere;
 use arrayvec::ArrayVec;
 use std::borrow::Borrow;
-use std::iter;
+use std::collections::LinkedList;
+use std::iter::{self, successors};
 
 
 /// Possible positions of a child Bsp node relative to its parent (for `BspAddToNode`).
@@ -183,8 +184,8 @@ pub fn merge_near_points(model: &mut UModel, dist: f32) -> (usize, usize) {
     // Remap VertPool.
     for i in 0..model.vertices.len() {
         // TODO: peril abound, vertex_index is INT in original code.
-        if model.vertices[i].vertex_index >= 0 && model.vertices[i].vertex_index < model.points.len() {
-            model.vertices[i].vertex_index = point_remap[model.vertices[i].vertex_index];
+        if model.vertices[i].point_index >= 0 && model.vertices[i].point_index < model.points.len() {
+            model.vertices[i].point_index = point_remap[model.vertices[i].point_index];
         }
     }
 
@@ -203,7 +204,7 @@ pub fn merge_near_points(model: &mut UModel, dist: f32) -> (usize, usize) {
             let a = &pool[j];
             let b = &pool[if j == 0 { node.vertex_count as usize - 1 } else { j - 1 }];
 
-            if a.vertex_index != b.vertex_index {
+            if a.point_index != b.point_index {
                 pool[k] = pool[j];
                 k += 1;
             }
@@ -370,10 +371,10 @@ pub fn bsp_add_node(model: &mut UModel, mut parent_node_index: Option<usize>, no
             let vertex_index = model.bsp_add_point(*ed_poly_vertex, false);
             let vert_pool = &mut model.vertices[vertex_pool_range.clone()];
             let node = &mut model.nodes[node_index];
-            if node.vertex_count == 0 || vert_pool[node.vertex_count - 1].vertex_index != vertex_index {
+            if node.vertex_count == 0 || vert_pool[node.vertex_count - 1].point_index != vertex_index {
                 points.push(*ed_poly_vertex);
                 vert_pool[node.vertex_count].side_index = None;
-                vert_pool[node.vertex_count].vertex_index = vertex_index;
+                vert_pool[node.vertex_count].point_index = vertex_index;
                 node.vertex_count += 1;
             }
         }
@@ -381,7 +382,7 @@ pub fn bsp_add_node(model: &mut UModel, mut parent_node_index: Option<usize>, no
         let node = &mut model.nodes[node_index];
         let vert_pool = &mut model.vertices[vertex_pool_range.clone()];
 
-        if node.vertex_count >= 2 && vert_pool[0].vertex_index == vert_pool[node.vertex_count - 1].vertex_index {
+        if node.vertex_count >= 2 && vert_pool[0].point_index == vert_pool[node.vertex_count - 1].point_index {
             node.vertex_count -= 1;
         }
 
@@ -506,7 +507,7 @@ fn filter_ed_poly(filter_func: BspFilterFunc, model: &mut UModel, mut node_index
         }
     
         // Split em.
-        let plane_base = model.points[model.vertices[model.nodes[node_index].vertex_pool_index].vertex_index];
+        let plane_base = model.points[model.vertices[model.nodes[node_index].vertex_pool_index].point_index];
         let plane_normal = model.vectors[model.surfaces[model.nodes[node_index].surface_index].normal_index];
         let mut do_front = false;
     
@@ -811,7 +812,7 @@ fn bsp_node_to_fpoly(model: &UModel, node_index: usize) -> Option<FPoly> {
     ed_poly.light_map_scale = poly.light_map_scale;
 
     for vert in vert_pool {
-        ed_poly.vertices.push(model.points[vert.vertex_index]);
+        ed_poly.vertices.push(model.points[vert.point_index]);
     }
 
     ed_poly.remove_colinears();
@@ -1046,7 +1047,7 @@ pub fn bsp_brush_csg(
 
         // NOTE: TempModel is the brush model.
 
-        bsp_build(&mut temp_model, EBspOptimization::Lame, 0, 70, true);
+        bsp_build(&mut temp_model, EBspOptimization::Lame, 0, 70, BspRebuildMode::AllButPolys);
 
         temp_model.build_bound();
         
@@ -1322,24 +1323,28 @@ pub fn bsp_build_bounds(model: &mut UModel) {
 ///
 /// Opt     = Bsp optimization, BSP_Lame (fast), BSP_Good (medium), BSP_Optimal (slow)
 /// Balance = 0-100, 0=only worry about minimizing splits, 100=only balance tree.
-fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: u8, portal_bias: u8, rebuild_simple_polys: bool) {
+fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: u8, portal_bias: u8, rebuild_mode: BspRebuildMode) {
     let original_polys = model.polys.len();
 
 	// Empty the model's tables.
-    if rebuild_simple_polys {
-		// Empty everything but polys.
-        model.empty_model(true, false);
-    } else {
-		// Empty node vertices.
-        for node in model.nodes.iter_mut() {
-            node.vertex_count = 0;
+    match rebuild_mode {
+        BspRebuildMode::AllButPolys => {
+            // Empty everything but polys.
+            model.empty_model(true, false);
+        },
+        BspRebuildMode::Nodes => {
+            // Empty node vertices.
+            for node in model.nodes.iter_mut() {
+                node.vertex_count = 0;
+            }
+
+            // Refresh the Bsp.
+            bsp_refresh(model, true);
+
+            // Empty nodes.
+            model.empty_model(false, false);
         }
-
-        // Refresh the Bsp.
-        bsp_refresh(model, true);
-
-        // Empty nodes.
-        model.empty_model(false, false);
+        _ => {}
     }
 
     if !model.polys.is_empty() {
@@ -1351,10 +1356,10 @@ fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: u8, po
             }
         }
 
-        split_poly_list(model, None, ENodePlace::Root, &poly_indices, optimization, balance, portal_bias, rebuild_simple_polys);
+        split_poly_list(model, None, ENodePlace::Root, &poly_indices, optimization, balance, portal_bias, rebuild_mode);
 
         // Now build the bounding boxes for all nodes.
-        if !rebuild_simple_polys {
+        if rebuild_mode == BspRebuildMode::Nodes {
             // Remove unreferenced things.
             bsp_refresh(model, true);
 
@@ -1377,7 +1382,7 @@ pub fn split_poly_list(
     optimization: EBspOptimization, 
     balance: u8, 
     portal_bias: u8, 
-    rebuild_simple_polys: bool
+    rebuild_mode: BspRebuildMode
 ) {
 	// To account for big EdPolys split up.
     let num_polys_to_alloc = poly_indices.len() + 8 + poly_indices.len() / 4;
@@ -1388,6 +1393,8 @@ pub fn split_poly_list(
     let split_poly_index = find_best_split_with_indices(&model.polys, poly_indices, optimization, balance, portal_bias);
 
 	// Add the splitter poly to the Bsp with either a new BspSurf or an existing one.
+    let rebuild_simple_polys = rebuild_mode == BspRebuildMode::AllButPolys || rebuild_mode == BspRebuildMode::None;
+
     if rebuild_simple_polys {
         if let Some(split_poly_index) = split_poly_index {
             let split_poly = &mut model.polys[split_poly_index];
@@ -1470,11 +1477,11 @@ pub fn split_poly_list(
     }
 
     if !front_poly_indices.is_empty() {
-        split_poly_list(model, Some(our_node_index), ENodePlace::Front, &front_poly_indices, optimization, balance, portal_bias, rebuild_simple_polys);
+        split_poly_list(model, Some(our_node_index), ENodePlace::Front, &front_poly_indices, optimization, balance, portal_bias, rebuild_mode);
     }
 
     if !back_poly_indices.is_empty() {
-        split_poly_list(model, Some(our_node_index), ENodePlace::Back, &back_poly_indices, optimization, balance, portal_bias, rebuild_simple_polys);
+        split_poly_list(model, Some(our_node_index), ENodePlace::Back, &back_poly_indices, optimization, balance, portal_bias, rebuild_mode);
     }
 
 }
@@ -1661,7 +1668,7 @@ pub fn bsp_refresh(model: &mut UModel, no_remap_surfs: bool) {
     for node in model.nodes.iter_mut() {
         let vert_pool = &model.vertices[node.vertex_pool_index..node.vertex_pool_index + node.vertex_count];
         for vert in vert_pool {
-            point_ref[vert.vertex_index] = Some(0);
+            point_ref[vert.point_index] = Some(0);
         }
     }
     
@@ -1699,7 +1706,7 @@ pub fn bsp_refresh(model: &mut UModel, no_remap_surfs: bool) {
     for node in model.nodes.iter_mut() {
         let vert_pool = &mut model.vertices[node.vertex_pool_index..node.vertex_pool_index + node.vertex_count];
         for vert in vert_pool {
-            vert.vertex_index = point_ref[vert.vertex_index].unwrap();
+            vert.point_index = point_ref[vert.point_index].unwrap();
         }
     }
 
@@ -1761,10 +1768,17 @@ pub fn bsp_build_fpolys(model: &mut UModel, surf_links: bool, node_index: usize)
     }
 }
 
-pub fn bsp_repartition(model: &mut UModel, node_index: usize, rebuild_simple_polys: bool) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BspRebuildMode {
+    Nodes,       // 0
+    AllButPolys, // 1
+    None,        // 2
+}
+
+pub fn bsp_repartition(model: &mut UModel, node_index: usize, rebuild_mode: BspRebuildMode) {
     bsp_build_fpolys(model, true, node_index);
     bsp_merge_coplanars(model, false, false);
-    bsp_build(model, EBspOptimization::Good, 12, 70, rebuild_simple_polys);
+    bsp_build(model, EBspOptimization::Good, 12, 70, rebuild_mode);
     bsp_refresh(model, true);
 }
 
@@ -1776,14 +1790,10 @@ pub fn bsp_repartition(model: &mut UModel, node_index: usize, rebuild_simple_pol
 // in an arbitrary way, that preserves the clockwise orientation of the vertices.
 //
 // Maintains node-vertex list, if not NULL.
-fn add_point_to_node(model: &mut UModel, point_verts: &mut FPointVertList, node_index: usize, vertex_number: usize, vertex_index: usize) {
-    {
-        let node = &mut model.nodes[node_index];
-
-        if node.vertex_count + 1 >= BSP_NODE_MAX_NODE_VERTICES {
-            // Just refuse to add point: This is a non-fatal problem.
-            return;
-        }
+fn add_point_to_node(model: &mut UModel, point_verts: &mut FPointVertList, node_index: usize, vertex_number: usize, point_index: usize) {
+    if model.nodes[node_index].vertex_count + 1 >= BSP_NODE_MAX_NODE_VERTICES {
+        // Just refuse to add point: This is a non-fatal problem.
+        return;
     }
 
 	// Remove node from vertex list, since vertex numbers will be reordered.
@@ -1798,9 +1808,10 @@ fn add_point_to_node(model: &mut UModel, point_verts: &mut FPointVertList, node_
 
 	// Make sure this node doesn't already contain the vertex.
     for i in 0..node.vertex_count {
-        debug_assert!(model.vertices[old_vert + i].vertex_index != vertex_index);
+        debug_assert!(model.vertices[old_vert + i].point_index != point_index);
     }
 
+    // TODO: this is probably incorrect.
     // Copy the old vertex pool to the new one.
     for i in 0..vertex_number {
         model.vertices[node.vertex_pool_index + i] = model.vertices[old_vert + i];
@@ -1813,7 +1824,7 @@ fn add_point_to_node(model: &mut UModel, point_verts: &mut FPointVertList, node_
 	// Add the new point to the new vertex pool.
     {
         let new_point = &mut model.vertices[node.vertex_pool_index + vertex_number];
-        new_point.vertex_index = vertex_index;
+        new_point.point_index = point_index;
         new_point.side_index = None;
     }
 
@@ -1828,11 +1839,11 @@ fn add_point_to_node(model: &mut UModel, point_verts: &mut FPointVertList, node_
 /// this point but doesn't contain it, and has the correct (clockwise) orientation
 /// as this side.  pVertex is the index of the point to handle, and
 /// ReferenceVertex defines the direction of this side.
-pub fn distribute_point<'a>(model: &'a mut UModel, point_verts: &'a mut FPointVertList, node_index: usize, vertex_index: usize) -> usize {
+pub fn distribute_point<'a>(model: &'a mut UModel, point_verts: &'a mut FPointVertList, node_index: usize, point_index: usize) -> usize {
     let mut count = 0usize;
 
     // Handle front, back, and plane.
-    let distance = model.nodes[node_index].plane.plane_dot(model.points[vertex_index]);
+    let distance = model.nodes[node_index].plane.plane_dot(model.points[point_index]);
 
     const THRESH_OPTGEOM_COPLANAR: f32 = 0.25f32;		/* Threshold for Bsp geometry optimization */
     const THRESH_OPTGEOM_COSIDAL: f32 = 0.25f32;		/* Threshold for Bsp geometry optimization */
@@ -1840,29 +1851,31 @@ pub fn distribute_point<'a>(model: &'a mut UModel, point_verts: &'a mut FPointVe
     if distance < THRESH_OPTGEOM_COPLANAR {
         // Back.
         if let Some(back_node_index) = model.nodes[node_index].back_node_index {
-            count += distribute_point(model, point_verts, back_node_index, vertex_index);
+            count += distribute_point(model, point_verts, back_node_index, point_index);
         }
     }
 
     if distance > -THRESH_OPTGEOM_COPLANAR {
         // Front.
         if let Some(front_node_index) = model.nodes[node_index].front_node_index {
-            count += distribute_point(model, point_verts, front_node_index, vertex_index);
+            count += distribute_point(model, point_verts, front_node_index, point_index);
         }
     }
 
-    if distance > -THRESH_OPTGEOM_COSIDAL && distance < THRESH_OPTGEOM_COPLANAR {
+    if distance > -THRESH_OPTGEOM_COPLANAR && distance < THRESH_OPTGEOM_COPLANAR {
 		// This point is coplanar with this node, so check point for intersection with
 		// this node's sides, then loop with its coplanars.
-        loop {
+        // NOTE: Would be nice if this didn't require allocations! Unfortunately this results in a borrow checker error.
+        let node_indices: Vec<usize> = successors(Some(node_index), |node_index| model.nodes[*node_index].plane_index).collect();
+        for node_index in node_indices {
             let node = &model.nodes[node_index];
             let vert_pool = &model.vertices[node.vertex_pool_index..node.vertex_pool_index + node.vertex_count];
 
 			// Skip this node if it already contains the point in question.
-            if vert_pool.iter().find(|v| v.vertex_index == vertex_index).is_none() {
+            if vert_pool.iter().find(|v| v.point_index == point_index).is_some() {
                 continue;
             }
-
+            
 			// Loop through all sides and see if (A) side is colinear with point, and
 			// (B) point falls within inside of this side.
             let mut found_side = None;
@@ -1874,13 +1887,13 @@ pub fn distribute_point<'a>(model: &'a mut UModel, point_verts: &'a mut FPointVe
                 let j = if i > 0 { i - 1 } else {vert_pool.len() - 1 };
 
 				// Create cutting plane perpendicular to both this side and the polygon's normal.
-                let side = model.points[vert_pool[i].vertex_index] - model.points[vert_pool[j].vertex_index];
+                let side = model.points[vert_pool[i].point_index] - model.points[vert_pool[j].point_index];
                 let side_plane_normal = side.cross(node.plane.normal());
                 let size_squared = side_plane_normal.magnitude2();
 
                 if size_squared > (0.001 * 0.001) {
                     // Points aren't coincident.
-                    let dist = (model.points[vertex_index] - model.points[vert_pool[i].vertex_index]).dot(side_plane_normal) / size_squared.sqrt();
+                    let dist = (model.points[point_index] - model.points[vert_pool[i].point_index]).dot(side_plane_normal) / size_squared.sqrt();
 
                     if dist >= THRESH_OPTGEOM_COSIDAL {
 						// Point is outside polygon, can't possibly fall on a side.
@@ -1895,8 +1908,8 @@ pub fn distribute_point<'a>(model: &'a mut UModel, point_verts: &'a mut FPointVe
 						//
 						// Do this by checking distance from point to side's midpoint and
 						// comparing with the side's half-length.
-                        let mid_point = (model.points[vert_pool[i].vertex_index] + model.points[vert_pool[j].vertex_index]) * 0.5f32;
-                        let mid_dist_vect = model.points[vertex_index] - mid_point;
+                        let mid_point = (model.points[vert_pool[i].point_index] + model.points[vert_pool[j].point_index]) * 0.5f32;
+                        let mid_dist_vect = model.points[point_index] - mid_point;
 
                         if mid_dist_vect.magnitude2() <= (0.501 * 0.501) * side.magnitude2() {
                             found_side = Some(i);
@@ -1916,8 +1929,7 @@ pub fn distribute_point<'a>(model: &'a mut UModel, point_verts: &'a mut FPointVe
             if !is_point_outside_polygon && found_side.is_some() {
 				// AddPointToNode will reorder the vertices in this node.  This is okay
 				// because it's called outside of the vertex loop.
-                // TODO: redundant, point_verts contains a reference to the model.
-                add_point_to_node(model, point_verts, node_index, found_side.unwrap(), vertex_index);
+                add_point_to_node(model, point_verts, node_index, found_side.unwrap(), point_index);
                 count += 1;
             } else if skipped_colinear {
 				// This happens occasionally because of the fuzzy Dist comparison.  It is
@@ -1945,20 +1957,17 @@ pub fn bsp_opt_geom(model: &mut UModel) {
     model.num_shared_sides = 4;
 
 	// Mark all sides as unlinked.
-    for vert in model.vertices.iter_mut() {
-        vert.side_index = None;
-    }
+    model.vertices.iter_mut().for_each(|vert| vert.side_index = None);
 
     let mut tees_found = 0;
-
     let mut point_verts = FPointVertList::new(model.points.len());
     point_verts.add_all_nodes(model);
-    
+
 	// Eliminate T-joints on each node by finding all vertices that aren't attached to
 	// two shared sides, then filtering them down through the BSP and adding them to
 	// the sides they belong on.
     for node_index in 0..model.nodes.len() {
-		// Loop through all sides (side := line from PrevVert to ThisVert)	
+		// Loop through all sides (side := line from PrevVert to ThisVert)
         let node_vertex_count = model.nodes[node_index].vertex_count;
         let node_vertex_pool_index = model.nodes[node_index].vertex_pool_index;
         for this_vert in 0..node_vertex_count {
@@ -1966,8 +1975,8 @@ pub fn bsp_opt_geom(model: &mut UModel) {
 
 			// Count number of nodes sharing this side, i.e. number of nodes for
 			// which two adjacent vertices are identical to this side's two vertices.
-            let skip_it = point_verts.iter(model, model.nodes[node_index].vertex_pool_index + this_vert).any(|point_vert_1| {
-                point_verts.iter(model, model.nodes[node_index].vertex_pool_index + prev_vert).any(|point_vert_2| {
+            let skip_it: bool = point_verts.indices[model.vertices[node_vertex_pool_index + this_vert].point_index].iter().any(|point_vert_1| {
+                point_verts.indices[model.vertices[node_vertex_pool_index + prev_vert].point_index].iter().any(|point_vert_2| {
                     point_vert_1.node_index == point_vert_2.node_index && point_vert_1.node_index != node_index
                 })
             });
@@ -1978,8 +1987,8 @@ pub fn bsp_opt_geom(model: &mut UModel) {
                 // DistributePoint will not affect the current node but may change others
                 // and may increase the number of nodes in the Bsp.
                 tees_found += 1;
-                distribute_point(model, &mut point_verts, 0, model.vertices[node_vertex_pool_index + this_vert].vertex_index);
-                distribute_point(model, &mut point_verts, 0, model.vertices[node_vertex_pool_index + prev_vert].vertex_index);
+                distribute_point(model, &mut point_verts, 0, model.vertices[node_vertex_pool_index + this_vert].point_index);
+                distribute_point(model, &mut point_verts, 0, model.vertices[node_vertex_pool_index + prev_vert].point_index);
             }
         }
     }
@@ -1998,11 +2007,9 @@ pub fn bsp_opt_geom(model: &mut UModel) {
                 if model.vertices[node_vertex_pool_index + this_vert].side_index.is_none() {
                     // See if this node links to another one.
                     let prev_vert = if this_vert > 0 { this_vert - 1 } else { node_vertex_count - 1 };
-                    let a = model.vertices[node_vertex_pool_index + this_vert].vertex_index;
-                    let b = model.vertices[node_vertex_pool_index + prev_vert].vertex_index;
 
-                    for point_vert_1 in point_verts.iter(model, a) {
-                        for point_vert_2 in point_verts.iter(model, b) {
+                    for point_vert_1 in point_verts.indices[model.vertices[node_vertex_pool_index + this_vert].point_index].iter() {
+                        for point_vert_2 in point_verts.indices[model.vertices[node_vertex_pool_index + prev_vert].point_index].iter() {
                             if point_vert_1.node_index == point_vert_2.node_index && point_vert_1.node_index != node_index {
                                 // Make sure that the other node's two vertices are adjacent and
                                 // ordered opposite this node's vertices.
@@ -2065,75 +2072,37 @@ pub fn bsp_opt_geom(model: &mut UModel) {
 }
 
 /// A node and vertex number corresponding to a point, used in generating Bsp side links.
-struct FPointVert {
+#[derive(Debug)]
+pub struct FPointVert {
     pub node_index: usize,
     pub vertex_index: usize,
-    pub next_index: Option<usize>,
 }
 
 /// A list of point/vertex links, used in generating Bsp side links.
-struct FPointVertList {
-    // pub model: &'a mut UModel,
-    pub indices: Vec<Option<FPointVert>>,
-}
-
-struct PointVertIter<'a> {
-    point_verts: &'a [Option<FPointVert>],
-    current_index: Option<usize>,
-}
-
-impl<'a> PointVertIter<'a> {
-    fn new(start_index: Option<usize>, point_verts: &'a [Option<FPointVert>]) -> Self {
-        Self {
-            point_verts,
-            current_index: start_index,
-        }
-    }
-}
-
-impl FPointVertList {
-    fn iter(&self, model: &mut UModel, vert_idx: usize) -> PointVertIter {
-        let start_index = model.vertices[vert_idx].vertex_index;
-        PointVertIter::new(Some(start_index), &self.indices)
-    }
-}
-
-impl<'a> Iterator for PointVertIter<'a> {
-    type Item = &'a FPointVert;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.current_index.and_then(|index| {
-            if let Some(ref point_vert) = self.point_verts[index] {
-                self.current_index = point_vert.next_index;
-                Some(point_vert)
-            } else {
-                None
-            }
-        })
-    }
+pub struct FPointVertList {
+    pub indices: Vec<Vec<FPointVert>>,
 }
 
 impl<'a> FPointVertList {
     pub fn new(capacity: usize) -> Self {
         Self {
-            indices: Vec::with_capacity(capacity),  // TODO: should this actually be just filled with None?
+            // Fill with none.
+            indices: Vec::from_iter((0..capacity).map(|_| Vec::new())),
         }
     }
 
     /// Add all of a node's vertices to a node-vertex list.
     pub fn add_node(&mut self, model: &UModel, node_index: usize) {
         let node = &model.nodes[node_index];
+        // TODO: would be nice to have a function to get the vertex pool for a node since this is used in multiple places.
         let vert_pool = &model.vertices[node.vertex_pool_index..node.vertex_pool_index + node.vertex_count];
 
         for (i, vert) in vert_pool.iter().enumerate() {
-            let vertex_index = vert.vertex_index;
-
 			// Add new point/vertex pair to array, and insert new array entry
 			// between index and first entry.
-            self.indices[vertex_index] = Some(FPointVert {
+            self.indices[vert.point_index].insert(0, FPointVert {
                 node_index,
                 vertex_index: i,
-                next_index: Some(vertex_index),
             });
         }
     }
@@ -2153,20 +2122,14 @@ impl<'a> FPointVertList {
 
 		// Loop through all of the node's vertices and search through the
 		// corresponding point's node-vert list, and delink this node.
-        let mut count = 0;
+        let mut count = 0usize;
         for vert in vert_pool.iter_mut() {
-            let vertex_index = vert.vertex_index;
-            let mut prev_link_index_optional = Some(vertex_index);
-            while let Some(prev_link_index) = prev_link_index_optional {
-                if let Some(prev_link) = &mut self.indices[prev_link_index] {
-                    if prev_link.node_index == node_index {
-                        // Delink this entry from the list.
-                        prev_link_index_optional = prev_link.next_index;
-                        count += 1;
-                    }
-                } else {
-                    break;
-                }
+            let point_index = vert.point_index;
+            let indices = &mut self.indices[point_index];
+
+            if let Some(index) = indices.iter().position(|point_vert| point_vert.node_index == node_index) {
+                indices.remove(index);
+                count += 1;
             }
 
 			// Node's vertex wasn't found, there's a bug.

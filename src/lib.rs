@@ -160,7 +160,7 @@ static POLY_FLAGS: phf::Map<&'static str, u32> = phf::phf_map! {
     "TRANSLUCENT" => 0x00000004,
     "NOT_SOLID" => 0x00000008,
     "ENVIRONMENT" => 0x00000010,
-    "SEMISOLID" => 0x00000020,
+    "SEMI_SOLID" => 0x00000020,
     "MODULATED" => 0x00000040,
     "FAKE_BACKDROP" => 0x00000080,
     "TWO_SIDED" => 0x00000100,
@@ -279,7 +279,7 @@ impl From<&FBspSurf> for BspSurface {
 #[derive(Clone, Copy, Debug)]
 struct Vertex {
     #[pyo3(get)]
-    pub vertex_index: usize,
+    pub point_index: usize,
     #[pyo3(get)]
     pub side_index: Option<usize>,  // TODO: this is actually the edge, not "side".
 }
@@ -287,7 +287,7 @@ struct Vertex {
 impl From<&FVert> for Vertex {
     fn from(vert: &FVert) -> Self {
         Vertex {
-            vertex_index: vert.vertex_index,
+            point_index: vert.point_index,
             side_index: vert.side_index,
         }
     }
@@ -383,7 +383,7 @@ impl From<&UModel> for Model {
 
 #[pyclass]
 #[derive(Clone)]
-struct BspBuildOptions {
+pub struct BspBuildOptions {
     #[pyo3(get, set)]
     pub do_geometry: bool,
     #[pyo3(get, set)]
@@ -400,6 +400,8 @@ struct BspBuildOptions {
     pub bsp_balance: i32,
     #[pyo3(get, set)]
     pub bsp_portal_bias: i32,
+    #[pyo3(get, set)]
+    pub should_optimize_geometry: bool,
 }
 
 impl Default for BspBuildOptions {
@@ -413,7 +415,7 @@ impl Default for BspBuildOptions {
             bsp_optimization: EBspOptimization::Lame,
             bsp_balance: 15,
             bsp_portal_bias: 70,
-            
+            should_optimize_geometry: true,
         }
     }
 }
@@ -437,7 +439,7 @@ fn csg_rebuild(brushes: Vec<PyRef<Brush>>, options: BspBuildOptions) -> PyResult
     let mut level = ULevel::new(brushes);
 
     // Rebuild the CSG.
-    csg_rebuild(&mut level);
+    csg_rebuild(&mut level, &options);
     
     Ok(Model::from(&level.model))
 }

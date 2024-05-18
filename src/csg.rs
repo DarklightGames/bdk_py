@@ -1,7 +1,8 @@
-use crate::bsp::{bsp_brush_csg, ECsgOper, bsp_repartition, bsp_build_bounds};
+use crate::bsp::{bsp_brush_csg, ECsgOper, bsp_repartition, bsp_build_bounds, BspRebuildMode, bsp_opt_geom};
 use crate::fpoly::EPolyFlags;
 use crate::model::UModel;
 use crate::brush::ABrush;
+use crate::BspBuildOptions;
 
 pub struct ULevel {
     pub model: UModel,
@@ -49,7 +50,7 @@ pub fn enlist_leaves(model: &UModel, front_node_indices: &mut Vec<usize>, back_n
     }
 }
 
-pub fn csg_rebuild(level: &mut ULevel) {
+pub fn csg_rebuild(level: &mut ULevel, options: &BspBuildOptions) {
     // Empty the model out.
     level.model.empty_model(true, true);
 
@@ -67,7 +68,7 @@ pub fn csg_rebuild(level: &mut ULevel) {
     }
 
     // Repartition the structural BSP.
-    bsp_repartition(&mut level.model, 0, false);
+    bsp_repartition(&mut level.model, 0, BspRebuildMode::Nodes);
 
     // test_visibility(level, level.model, 0, false);  // TODO: borrowing issues here obviously.
 
@@ -78,8 +79,6 @@ pub fn csg_rebuild(level: &mut ULevel) {
         enlist_leaves(&level.model, &mut front_node_indices, &mut back_node_indices);
     }
 
-    return ();
-
     // Compose all detail brushes.
     for brush in &level.brushes {
         if brush.poly_flags.contains(EPolyFlags::Semisolid) && brush.csg_operation == ECsgOper::Add && !brush.poly_flags.contains(EPolyFlags::Portal) {
@@ -87,18 +86,18 @@ pub fn csg_rebuild(level: &mut ULevel) {
         }
     }
     
-    // TODO: the "2" is a number that dodges either of the model-emptying calls downstream in bspBuild.
-    // Come up with a better way to handle this 'cause it's confusing af.
 	// Optimize the sub-bsp's.
-    // for front_node_index in front_node_indices {
-    //     bsp_repartition(&mut level.model, front_node_index, 2);
-    // }
-    // for back_node_index in back_node_indices {
-    //     bsp_repartition(&mut level.model, back_node_index, 2);
-    // }
+    for front_node_index in front_node_indices {
+        bsp_repartition(&mut level.model, front_node_index, BspRebuildMode::None);
+    }
+    for back_node_index in back_node_indices {
+        bsp_repartition(&mut level.model, back_node_index, BspRebuildMode::None);
+    }
 
     // Build bounding volumes.
-    // bsp_opt_geom(&mut level.model);
+    if options.should_optimize_geometry {
+        bsp_opt_geom(&mut level.model);
+    }
     bsp_build_bounds(&mut level.model);
 
     // Rebuild dynamic brush BSP's. // BDK: skip.

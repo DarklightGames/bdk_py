@@ -386,7 +386,7 @@ impl FPoly {
     pub fn split_with_node(&self, model: &UModel, node_index: usize, very_precise: bool) -> ESplitType {
         let node = &model.nodes[node_index];
         let surface = &model.surfaces[node.surface_index];
-        let plane_base = model.points[model.vertices[node.vertex_pool_index].vertex_index];
+        let plane_base = model.points[model.vertices[node.vertex_pool_index].point_index];
         let plane_normal = model.vectors[surface.normal_index];
 
         self.split_with_plane(plane_base, plane_normal, very_precise)

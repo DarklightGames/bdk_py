@@ -197,8 +197,8 @@ impl FBspNode {
 /// other sides in the level which are cospatial with this side.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FVert {
-    /// Index of vertex.
-    pub vertex_index: usize,
+    /// Index of point. (BDK: called VertexIndex in the original code, but that's incorrect!)
+    pub point_index: usize,
     /// If shared, index of unique side. Otherwise INDEX_NONE.
     pub side_index: Option<usize>,
 }
@@ -206,7 +206,7 @@ pub struct FVert {
 impl FVert {
     pub fn new() -> FVert {
         FVert {
-            vertex_index: 0,
+            point_index: 0,
             side_index: None,
         }
     }
@@ -362,7 +362,7 @@ impl UModel {
         self.find_nearest_vertex_recursive(source_point, dest_point, min_radius, Some(0), vertex_index)
     }
 
-    fn find_nearest_vertex_recursive(&self, source_point: FVector, dest_point: &mut FVector, mut min_radius: f32, node_index: Option<usize>, vertex_index: &mut usize) -> f32 {
+    fn find_nearest_vertex_recursive(&self, source_point: FVector, dest_point: &mut FVector, mut min_radius: f32, node_index: Option<usize>, point_index: &mut usize) -> f32 {
         let mut result_radius = -1.0f32;
         let mut next_node_index = node_index;
 
@@ -374,7 +374,7 @@ impl UModel {
             if plane_distance >= -min_radius {
                 if let Some(front_node_index) = node.front_node_index {
                     // Check front.
-                    let temp_radius = self.find_nearest_vertex_recursive(source_point, dest_point, min_radius, Some(front_node_index), vertex_index);
+                    let temp_radius = self.find_nearest_vertex_recursive(source_point, dest_point, min_radius, Some(front_node_index), point_index);
                     if temp_radius >= 0.0 {
                         result_radius = temp_radius;
                         min_radius = temp_radius;
@@ -393,7 +393,7 @@ impl UModel {
                     let temp_radius_squared = source_point.distance2(*base);
 
                     if temp_radius_squared < (min_radius * min_radius) {
-                        *vertex_index = surf.base_point_index;
+                        *point_index = surf.base_point_index;
                         min_radius = temp_radius_squared.sqrt();
                         result_radius = min_radius;
                         *dest_point = *base;
@@ -401,10 +401,10 @@ impl UModel {
 
                     let vert_pool = &self.vertices[node.vertex_pool_index..(node.vertex_pool_index + node.vertex_count as usize)];
                     for vert in vert_pool {
-                        let vertex = &self.points[vert.vertex_index];
+                        let vertex = &self.points[vert.point_index];
                         let temp_radius_squared = source_point.distance2(*vertex);
                         if temp_radius_squared < min_radius * min_radius {
-                            *vertex_index = vert.vertex_index;
+                            *point_index = vert.point_index;
                             min_radius = temp_radius_squared.sqrt();
                             result_radius = min_radius;
                             *dest_point = *vertex;
