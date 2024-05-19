@@ -1323,7 +1323,7 @@ pub fn bsp_build_bounds(model: &mut UModel) {
 ///
 /// Opt     = Bsp optimization, BSP_Lame (fast), BSP_Good (medium), BSP_Optimal (slow)
 /// Balance = 0-100, 0=only worry about minimizing splits, 100=only balance tree.
-fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: u8, portal_bias: u8, rebuild_mode: BspRebuildMode) {
+pub fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: u8, portal_bias: u8, rebuild_mode: BspRebuildMode) {
     let original_polys = model.polys.len();
 
 	// Empty the model's tables.
@@ -1607,9 +1607,8 @@ fn find_best_split_with_indices(polys: &[FPoly], poly_indices: &[usize], optimiz
 /// unused ones:
 pub fn bsp_refresh(model: &mut UModel, no_remap_surfs: bool) {
     // Removed unreferenced Bsp surfs.
-
     let mut node_ref = vec![None; model.nodes.len()];
-    let mut poly_ref = vec![None; model.polys.len()];
+    let mut poly_ref = vec![None; model.surfaces.len()];
 
     if !model.nodes.is_empty() {
         tag_referenced_nodes(model, &mut node_ref, &mut poly_ref);
@@ -1721,14 +1720,14 @@ fn tag_referenced_nodes(model: &UModel, node_ref: &mut [Option<usize>], poly_ref
         node_ref[node_index] = Some(0);
         poly_ref[node.surface_index] = Some(0);
 
-        if let Some(front_node_index) = node.front_node_index {
-            node_index_stack.push(front_node_index);
-        }
         if let Some(back_node_index) = node.back_node_index {
             node_index_stack.push(back_node_index);
         }
         if let Some(plane_node_index) = node.plane_index {
             node_index_stack.push(plane_node_index);
+        }
+        if let Some(front_node_index) = node.front_node_index {
+            node_index_stack.push(front_node_index);
         }
     }
 }

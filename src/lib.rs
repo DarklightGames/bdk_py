@@ -11,10 +11,11 @@ pub mod brush;
 pub mod csg;
 
 use std::collections::HashSet;
-use bsp::EBspOptimization;
+use bsp::{bsp_build, bsp_build_fpolys, bsp_merge_coplanars, bsp_opt_geom, EBspOptimization};
 use fpoly::{EPolyFlags, FPOLY_VERTEX_THRESHOLD};
 use model::{FBspNode, FBspSurf, FVert, UModel};
 use pyo3::prelude::*;
+use pyo3::types::PyFunction;
 use crate::fpoly::FPoly;
 
 #[pyclass]
@@ -397,9 +398,9 @@ pub struct BspBuildOptions {
     #[pyo3(get, set)]
     pub bsp_optimization: EBspOptimization,
     #[pyo3(get, set)]
-    pub bsp_balance: i32,
+    pub bsp_balance: u8,
     #[pyo3(get, set)]
-    pub bsp_portal_bias: i32,
+    pub bsp_portal_bias: u8,
     #[pyo3(get, set)]
     pub should_optimize_geometry: bool,
 }
@@ -430,7 +431,8 @@ impl BspBuildOptions {
 
 /// Formats the sum of two numbers as string.
 #[pyfunction]
-fn csg_rebuild(brushes: Vec<PyRef<Brush>>, options: BspBuildOptions) -> PyResult<Model> {
+// Have the progress callback be an optional argument.
+fn csg_rebuild(brushes: Vec<PyRef<Brush>>, options: BspBuildOptions, progress_callback: Option<&Bound<PyAny>>) -> PyResult<Model> {
     use crate::csg::{ULevel, csg_rebuild};
 
     // Convert the Brushes to ABrushes and add them to the level brush list.
@@ -440,8 +442,24 @@ fn csg_rebuild(brushes: Vec<PyRef<Brush>>, options: BspBuildOptions) -> PyResult
 
     // Rebuild the CSG.
     csg_rebuild(&mut level, &options);
+
+    if let Some(progress_callback) = progress_callback {
+        progress_callback.call0()?;
+    }
+
+    if options.do_bsp {
+        bsp_rebuild(&mut level.model, options);
+    }
     
     Ok(Model::from(&level.model))
+}
+
+fn bsp_rebuild(model: &mut UModel, options: BspBuildOptions) {
+    bsp_build_fpolys(model, true, 0);
+    bsp_merge_coplanars(model, false, false);
+    bsp_build(model, options.bsp_optimization, options.bsp_balance, options.bsp_portal_bias, bsp::BspRebuildMode::Nodes);
+    //test_visibility
+    bsp_opt_geom(model);
 }
 
 #[pymodule]
