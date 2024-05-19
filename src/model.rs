@@ -179,6 +179,10 @@ impl FBspNode {
         }
     }
 
+    pub fn is_leaf(&self) -> bool {
+        return self.back_node_index.is_none() && self.front_node_index.is_none();
+    }
+
     pub fn is_csg(&self, extra_flags: EBspNodeFlags) -> bool {
         self.vertex_count > 0 && !self.node_flags.intersects(EBspNodeFlags::IsNew | EBspNodeFlags::NotCsg | extra_flags)
     }

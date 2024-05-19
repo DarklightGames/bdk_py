@@ -689,7 +689,7 @@ pub fn bsp_merge_coplanars(model: &mut UModel, should_remap_links: bool, should_
     for i in 0..model.polys.len() {
         {
             let ed_poly = &mut model.polys[i];
-            if ed_poly.vertices.is_empty() || ed_poly.poly_flags.contains(EPolyFlags::EdProcessed) {
+            if ed_poly.vertices.is_empty() || ed_poly.poly_flags.intersects(EPolyFlags::EdProcessed) {
                 continue;
             }
             ed_poly.poly_flags |= EPolyFlags::EdProcessed;
@@ -1516,7 +1516,7 @@ fn find_best_split_with_indices(polys: &[FPoly], poly_indices: &[usize], optimiz
     let mut best_poly_index: Option<usize> = None;
     let mut best_score = 0.0f32;
 
-    // BDK: how is it possible to get a None out of this if there is at least one poly?
+    // BDK: this can be threaded!
 
     // Iterate over the polys with the given step.
     for i in (0..poly_indices.len()).step_by(step) {
@@ -2135,4 +2135,70 @@ impl<'a> FPointVertList {
             assert!(count >= 1);
         }
     }
+}
+
+#[derive(Debug, Default)]
+pub struct FBspStats {
+    pub depth_count: usize,
+    pub depth_max: usize,
+    pub front_leaves: usize,
+    pub back_leaves: usize,
+    pub branches: usize,
+    pub leaves: usize,
+    pub coplanars: usize,
+    pub depth_average: f32,
+}
+
+pub fn bsp_calc_stats(model: &UModel) -> FBspStats {
+    let mut stats = FBspStats::default();
+
+    if !model.nodes.is_empty() {
+        calc_bsp_stats(model, 0, &mut stats, true, 0);
+    }
+
+    stats.depth_average = stats.depth_count as f32 / stats.leaves as f32;
+
+    stats
+}
+
+fn calc_bsp_stats(model: &UModel, node_index: usize, stats: &mut FBspStats, is_front: bool, depth: usize) {
+    let node = &model.nodes[node_index];
+
+    stats.depth_count += 1;
+
+    if depth > stats.depth_max {
+        stats.depth_max = depth;
+    }
+
+	// Process front and back:
+    match (node.front_node_index, node.back_node_index) {
+        (None, None) => {
+            // Leaf node.
+            if depth > 0 {
+                if is_front {
+                    stats.front_leaves += 1;
+                } else {
+                    stats.back_leaves += 1;
+                }
+            }
+            stats.leaves += 1;
+        }
+        (Some(front_node_index), Some(back_node_index)) => {
+            stats.branches += 1;
+            calc_bsp_stats(model, front_node_index, stats, true, depth + 1);
+            calc_bsp_stats(model, back_node_index, stats, false, depth + 1);
+        },
+        (Some(front_node_index), None) => {
+            stats.front_leaves += 1;
+            calc_bsp_stats(model, front_node_index, stats, true, depth + 1);
+        },
+        (None, Some(back_node_index)) => {
+            stats.back_leaves += 1;
+            calc_bsp_stats(model, back_node_index, stats, false, depth + 1);
+        },
+    }
+
+	// Process coplanars:
+    stats.coplanars = successors(node.plane_index, |plane_index| model.nodes[*plane_index].plane_index).count();
+        
 }

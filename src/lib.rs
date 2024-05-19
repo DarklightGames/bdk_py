@@ -11,11 +11,10 @@ pub mod brush;
 pub mod csg;
 
 use std::collections::HashSet;
-use bsp::{bsp_build, bsp_build_fpolys, bsp_merge_coplanars, bsp_opt_geom, EBspOptimization};
+use bsp::{bsp_build, bsp_build_fpolys, bsp_calc_stats, bsp_merge_coplanars, bsp_opt_geom, EBspOptimization, FBspStats};
 use fpoly::{EPolyFlags, FPOLY_VERTEX_THRESHOLD};
 use model::{FBspNode, FBspSurf, FVert, UModel};
 use pyo3::prelude::*;
-use pyo3::types::PyFunction;
 use crate::fpoly::FPoly;
 
 #[pyclass]
@@ -316,6 +315,42 @@ impl From<&FBspNode> for BspNode {
 }
 
 #[pyclass]
+#[derive(Clone, Copy, Debug)]
+struct BspStats {
+    #[pyo3(get)]
+    pub depth_count: usize,
+    #[pyo3(get)]
+    pub depth_max: usize,
+    #[pyo3(get)]
+    pub front_leaves: usize,
+    #[pyo3(get)]
+    pub back_leaves: usize,
+    #[pyo3(get)]
+    pub branches: usize,
+    #[pyo3(get)]
+    pub leaves: usize,
+    #[pyo3(get)]
+    pub coplanars: usize,
+    #[pyo3(get)]
+    pub depth_average: f32,
+}
+
+impl From<FBspStats> for BspStats {
+    fn from(stats: FBspStats) -> Self {
+        BspStats {
+            depth_count: stats.depth_count,
+            depth_max: stats.depth_max,
+            front_leaves: stats.front_leaves,
+            back_leaves: stats.back_leaves,
+            branches: stats.branches,
+            leaves: stats.leaves,
+            coplanars: stats.coplanars,
+            depth_average: stats.depth_average,
+        }
+    }
+}
+
+#[pyclass]
 struct Model {
     #[pyo3(get)]
     pub points: Vec<(f32, f32, f32)>,
@@ -327,6 +362,8 @@ struct Model {
     pub vertices: Vec<Vertex>,
     #[pyo3(get)]
     pub vectors: Vec<(f32, f32, f32)>,
+    #[pyo3(get)]
+    pub stats: BspStats,
 }
 
 impl TryFrom<&str> for EBspOptimization {
@@ -372,12 +409,14 @@ impl From<&UModel> for Model {
         let surfaces: Vec<BspSurface> = model.surfaces.iter().map(|surface| BspSurface::from(surface)).collect();
         let vertices: Vec<Vertex> = model.vertices.iter().map(|vert| Vertex::from(vert)).collect();
         let vectors: Vec<(f32, f32, f32)> = model.vectors.iter().map(|vector| (vector.x, vector.y, vector.z)).collect();
+        let stats = BspStats::from(bsp_calc_stats(model));
         Model {
             points,
             nodes,
             surfaces,
             vertices,
             vectors,
+            stats,
         }
     }
 }
@@ -450,6 +489,10 @@ fn csg_rebuild(brushes: Vec<PyRef<Brush>>, options: BspBuildOptions, progress_ca
     if options.do_bsp {
         bsp_rebuild(&mut level.model, options);
     }
+
+    let stats = bsp_calc_stats(&level.model);
+
+    println!("BSP stats: {:?}", stats);
     
     Ok(Model::from(&level.model))
 }

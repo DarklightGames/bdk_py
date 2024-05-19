@@ -1,4 +1,4 @@
-use crate::bsp::{bsp_brush_csg, ECsgOper, bsp_repartition, bsp_build_bounds, BspRebuildMode, bsp_opt_geom};
+use crate::bsp::{ECsgOper, BspRebuildMode, bsp_brush_csg, bsp_repartition, bsp_build_bounds, bsp_opt_geom};
 use crate::fpoly::EPolyFlags;
 use crate::model::UModel;
 use crate::brush::ABrush;
