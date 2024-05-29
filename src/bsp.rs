@@ -704,6 +704,12 @@ pub fn bsp_merge_coplanars(model: &mut UModel, should_remap_links: bool, should_
                 continue;
             }
 
+            // BDK: Somehow, this doesn't fail when other_poly.vertices is empty in the original code even though
+            // there is no check for that here. I reckon what happens in the original code is that the 
+            if other_poly.vertices.is_empty() {
+                continue;
+            }
+
             let distance = (other_poly.vertices[0] - ed_poly.vertices[0]).dot(ed_poly.normal);
             // TODO: make this easier to understand what it's doing.
             let a = distance > -0.001 && distance < 0.001 && other_poly.normal.dot(ed_poly.normal) > 0.9999;
@@ -1419,7 +1425,6 @@ pub fn split_poly_list(
 
         let [ed_poly, split_poly] = model.polys.get_many_mut([*poly_index, split_poly_index.unwrap()]).unwrap();
         let split_result = ed_poly.split_with_plane(split_poly.vertices[0], split_poly.normal, false);
-        let ed_poly_copy = ed_poly.clone();
         
         // To dodge the borrow-checker, for the coplanar and split cases, we need to defer the
         // addition of the node and polys until we can drop the borrow of the ed and split polys.
@@ -1429,7 +1434,8 @@ pub fn split_poly_list(
                     // TODO: this will fail if the surfaces are empty.
                     ed_poly.link = Some(model.surfaces.len() - 1);
                 }
-                plane_node_index = bsp_add_node(model, Some(plane_node_index), ENodePlace::Plane, EBspNodeFlags::empty(), &ed_poly_copy);
+                let ed_poly_clone = ed_poly.clone();
+                plane_node_index = bsp_add_node(model, Some(plane_node_index), ENodePlace::Plane, EBspNodeFlags::empty(), &ed_poly_clone);
             }
             ESplitType::Front => {
                 front_poly_indices.push(*poly_index);
