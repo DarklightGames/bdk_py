@@ -497,6 +497,7 @@ fn csg_rebuild(brushes: Vec<PyRef<Brush>>, options: BspBuildOptions, progress_ca
     Ok(Model::from(&level.model))
 }
 
+// TODO: move this elsewhere.
 fn bsp_rebuild(model: &mut UModel, options: BspBuildOptions) {
     bsp_build_fpolys(model, true, 0);
     bsp_merge_coplanars(model, false, false);

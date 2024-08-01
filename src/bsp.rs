@@ -1,4 +1,4 @@
-use cgmath::{dot, InnerSpace};
+use cgmath::InnerSpace;
 
 use crate::box_::FBox;
 use crate::math::{point_plane_distance, points_are_near, points_are_same, FPlane, FVector, THRESH_VECTORS_ARE_NEAR};
@@ -7,8 +7,6 @@ use crate::model::{EBspNodeFlags, FBspNode, FBspSurf, FVert, UModel, BSP_NODE_MA
 use crate::brush::ABrush;
 use crate::sphere::FSphere;
 use arrayvec::ArrayVec;
-use std::borrow::Borrow;
-use std::collections::LinkedList;
 use std::iter::{self, successors};
 
 
@@ -184,14 +182,14 @@ pub fn merge_near_points(model: &mut UModel, dist: f32) -> (usize, usize) {
     // Remap VertPool.
     for i in 0..model.vertices.len() {
         // TODO: peril abound, vertex_index is INT in original code.
-        if model.vertices[i].point_index >= 0 && model.vertices[i].point_index < model.points.len() {
+        if model.vertices[i].point_index < model.points.len() {
             model.vertices[i].point_index = point_remap[model.vertices[i].point_index];
         }
     }
 
     // Remap Surfs.
     for i in 0..model.surfaces.len() {
-        if model.surfaces[i].base_point_index >= 0 && model.surfaces[i].base_point_index < model.points.len() {
+        if model.surfaces[i].base_point_index < model.points.len() {
             model.surfaces[i].base_point_index = point_remap[model.surfaces[i].base_point_index];
         }
     }
@@ -704,8 +702,9 @@ pub fn bsp_merge_coplanars(model: &mut UModel, should_remap_links: bool, should_
                 continue;
             }
 
-            // BDK: Somehow, this doesn't fail when other_poly.vertices is empty in the original code even though
-            // there is no check for that here. I reckon what happens in the original code is that the 
+            // BDK: This doesn't fail when other_poly.vertices is empty in the original code even though
+            // there is no check for that here. I reckon what happens in the original code is that it ends
+            // up just reading junk data. Folks on OldUnreal have reported that this can result in issues.
             if other_poly.vertices.is_empty() {
                 continue;
             }
@@ -766,7 +765,6 @@ pub fn bsp_validate_brush(brush: &mut UModel, force_validate: bool) {
             poly.link = Some(i);
         }
 
-        let mut n = 0;
         for i in 0..brush.polys.len() {
             if brush.polys[i].link == Some(i) {
                 // use get_many_mut
@@ -783,7 +781,6 @@ pub fn bsp_validate_brush(brush: &mut UModel, force_validate: bool) {
                         let distance = point_plane_distance(&other_poly.vertices[0], &ed_poly.vertices[0], &ed_poly.normal);
                         if distance > -0.001 && distance < 0.001 {
                             other_poly.link = Some(i);
-                            n += 1;
                         }
                     }
                 }
@@ -968,7 +965,7 @@ pub fn bsp_brush_csg(
     // Build the brush's coordinate system and find orientation of scale
 	// transform (if negative, edpolyTransform will reverse the clockness
 	// of the EdPoly points and invert the normal).
-    let (coords, uncoords, orientation) = ABrush::build_coords();
+    let (coords, _uncoords, orientation) = ABrush::build_coords();
 
 	// Transform original brush poly into same coordinate system as world
 	// so Bsp filtering operations make sense.
@@ -1330,8 +1327,6 @@ pub fn bsp_build_bounds(model: &mut UModel) {
 /// Opt     = Bsp optimization, BSP_Lame (fast), BSP_Good (medium), BSP_Optimal (slow)
 /// Balance = 0-100, 0=only worry about minimizing splits, 100=only balance tree.
 pub fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: u8, portal_bias: u8, rebuild_mode: BspRebuildMode) {
-    let original_polys = model.polys.len();
-
 	// Empty the model's tables.
     match rebuild_mode {
         BspRebuildMode::AllButPolys => {
