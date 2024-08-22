@@ -1077,7 +1077,7 @@ pub fn bsp_brush_csg(
 
 /// Clean up all nodes after a CSG operation.  Resets temporary bit flags and unlinks
 /// empty leaves.  Removes zero-vertex nodes which have nonzero-vertex coplanars.
-fn bsp_cleanup(model: &mut UModel) {
+pub fn bsp_cleanup(model: &mut UModel) {
     if !model.nodes.is_empty() {
         cleanup_nodes(model, 0, None)
     }
@@ -1193,11 +1193,11 @@ fn cleanup_nodes(model: &mut UModel, node_index: usize, parent_node_index: Optio
     }
 }
 
-// Build a 64-bit zone mask for each node, with a bit set for every
-// zone that's referenced by the node and its children.  This is used
-// during rendering to reject entire sections of the tree when it's known
-// that none of the zones in that section are active.
-fn build_zone_masks(model: &mut UModel, node_index: usize) -> u64 {
+/// Build a 64-bit zone mask for each node, with a bit set for every
+/// zone that's referenced by the node and its children.  This is used
+/// during rendering to reject entire sections of the tree when it's known
+/// that none of the zones in that section are active.
+pub fn build_zone_masks(model: &mut UModel, node_index: usize) -> u64 {
     let mut zone_mask = 0u64;
 
     {
@@ -1230,9 +1230,9 @@ fn build_zone_masks(model: &mut UModel, node_index: usize) -> u64 {
     zone_mask
 }
 
-const WORLD_MAX: f32 = 524288.0;     	/* Maximum size of the world */
-const HALF_WORLD_MAX: f32 = 262144.0;	/* Half the maximum size of the world */
-const HALF_WORLD_MAX1: f32 = 262143.0;	/* Half the maximum size of the world - 1*/
+pub const WORLD_MAX: f32 = 524288.0;     	/* Maximum size of the world */
+pub const HALF_WORLD_MAX: f32 = 262144.0;	/* Half the maximum size of the world */
+pub const HALF_WORLD_MAX1: f32 = 262143.0;	/* Half the maximum size of the world - 1*/
 
 fn filter_bound(model: &mut UModel, parent_bound: Option<&mut FBox>, node_index: usize, polys: &[FPoly], is_outside: bool) {
     let node = &model.nodes[node_index];

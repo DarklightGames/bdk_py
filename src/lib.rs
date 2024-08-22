@@ -9,6 +9,7 @@ pub mod sphere;
 pub mod coords;
 pub mod brush;
 pub mod csg;
+pub mod visibility;
 
 use std::collections::HashSet;
 use bsp::{bsp_build, bsp_build_fpolys, bsp_calc_stats, bsp_merge_coplanars, bsp_opt_geom, EBspOptimization, FBspStats};

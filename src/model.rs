@@ -138,7 +138,7 @@ pub struct FBspNode {
     /// Rendering bound.
     pub render_bound: Option<usize>,
 
-    /// Visibility zone in 1=front, 0=back.
+    /// Visibility zone in 0=back, 1=front
     pub zone: [u8;2],
     /// Number of vertices in node.
     pub vertex_count: usize,
@@ -222,11 +222,22 @@ pub struct FLeaf {
     /// The zone this convex volume is in.
     zone_index: usize,
     /// Lights permeating this volume considering shadowing.
-    permeating: usize,
+    permeating: Option<usize>,
     /// Volumetric lights hitting this region, no shadowing.
-    volumentic: usize,
+    volumentic: Option<usize>,
     /// Bit mask of visible zones from this convex volume.
-    visible_zone_bits: u64,
+    visible_zone_bits: usize,
+}
+
+impl FLeaf {
+    pub fn new(zone_index: usize) -> FLeaf {
+        FLeaf {
+            zone_index,
+            permeating: None,
+            volumentic: None,
+            visible_zone_bits: !0usize,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
