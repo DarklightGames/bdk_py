@@ -794,7 +794,7 @@ pub fn bsp_validate_brush(brush: &mut UModel, force_validate: bool) {
     brush.build_bound();
 }
 
-fn bsp_node_to_fpoly(model: &UModel, node_index: usize) -> Option<FPoly> {
+pub fn bsp_node_to_fpoly(model: &UModel, node_index: usize) -> Option<FPoly> {
     let node = &model.nodes[node_index];
     let poly = &model.surfaces[node.surface_index];
     let vert_pool = &model.vertices[node.vertex_pool_index..node.vertex_pool_index + node.vertex_count];

@@ -220,13 +220,13 @@ impl FVert {
 /// Information about a convex volume.
 pub struct FLeaf {
     /// The zone this convex volume is in.
-    zone_index: usize,
+    pub zone_index: usize,
     /// Lights permeating this volume considering shadowing.
-    permeating: Option<usize>,
+    pub permeating: Option<usize>,
     /// Volumetric lights hitting this region, no shadowing.
-    volumentic: Option<usize>,
+    pub volumentic: Option<usize>,
     /// Bit mask of visible zones from this convex volume.
-    visible_zone_bits: usize,
+    pub visible_zone_bits: usize,
 }
 
 impl FLeaf {
