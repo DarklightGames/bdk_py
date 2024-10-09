@@ -3,6 +3,8 @@ extern crate bit_vec;
 use arrayvec::ArrayVec;
 use bit_vec::BitVec;
 use cgmath::InnerSpace;
+use std::collections::LinkedList;
+use std::rc::Rc;
 
 use crate::bsp::{bsp_add_node, bsp_build_bounds, bsp_cleanup, bsp_node_to_fpoly, bsp_refresh, build_zone_masks, WORLD_MAX};
 use crate::fpoly::{EPolyFlags, ESplitType, FPoly, FPOLY_VERTEX_THRESHOLD};
@@ -121,10 +123,10 @@ pub struct FEditorVisibility<'a>
     zone_portal_count: usize,
     zone_fragment_count: usize,
     extra: usize,    // flags?
-    //first_portal: &mut FPortal, // use an index instead?
-    node_portals: Vec<FPortal>,
-    leaf_portals: Vec<FPortal>,
-    //leaf_lights: Vec<FActorLink>,   
+    portals: LinkedList<Rc<FPortal>>,
+    node_portals: Vec<Option<Rc<FPortal>>>,
+    leaf_portals: Vec<Option<Rc<FPortal>>>,
+    //leaf_lights: Vec<FActorLink>, 
     zone_portal_surface_index: Option<usize>,
 }
 
@@ -430,7 +432,23 @@ impl FEditorVisibility<'_> {
     fn add_portal(visibility: &mut FEditorVisibility, poly: &FPoly, front_leaf_index: Option<usize>, back_leaf_index: Option<usize>, generating_node_index: usize, generating_base: usize) {
         if let Some(front_leaf_index) = front_leaf_index { 
             if let Some(back_leaf_index) = back_leaf_index {
-		    // Add to linked list of all portals.
+		        // Add to linked list of all portals.
+                // TODO: original code has references to the portals, but that seems
+                // unnecessary since we already have the indices.
+                let portal = Rc::new(FPortal {
+                    poly: poly.clone(),
+                    front_leaf_index,
+                    back_leaf_index,
+                    node_index: generating_node_index,
+                    is_testing: false,
+                    should_test: false,
+                    fragment_count: 0,
+                    zone_portal_surface_index: None,
+                });
+                visibility.portals.push_back(portal.clone());
+                visibility.leaf_portals[front_leaf_index] = Some(portal.clone());
+                visibility.leaf_portals[back_leaf_index] = Some(portal.clone());
+                visibility.node_portals[generating_node_index] = Some(portal.clone());
             }
         }
     }
