@@ -107,8 +107,6 @@ impl FPortal {
 const MAX_CLIPS: usize = 16384;
 const CLIP_BACK_FLAG: usize = 0x40000000;
 
-type PortalFunc = fn(&mut UModel, &FPoly, Option<usize>, Option<usize>, usize, usize);
-
 pub struct FEditorVisibility<'a>
 {
     model: &'a mut UModel,
@@ -130,81 +128,82 @@ pub struct FEditorVisibility<'a>
     zone_portal_surface_index: Option<usize>,
 }
 
-//
-// Filter a portal through a front or back subtree.
-//
-fn filter_through_subtree(
-    model: &mut UModel,
-    pass: usize,
-    generating_node_index: usize,
-    generating_base_index: usize,
-    mut parent_leaf_index: Option<usize>,
-    node_index: Option<usize>,
-    mut poly: FPoly,
-    func: PortalFunc,
-    back_leaf_index: Option<usize>,
-) {
-    let mut outer_node_index = node_index;
-    while let Some(node_index) = outer_node_index {
-        // If overflow.
-        if poly.vertices.len() > FPOLY_VERTEX_THRESHOLD {
-            let poly_half = poly.split_in_half().unwrap();
-            filter_through_subtree(
-                model, pass, generating_node_index, generating_base_index,
-                parent_leaf_index, Some(node_index), poly_half, func, back_leaf_index,
-            );
-        }
-
-        // Test split.
-        let split_type = poly.split_with_node(model, node_index, true);
-
-        match split_type {
-            ESplitType::Split(front, back) => {
-                filter_through_subtree(
-                    model, pass, generating_node_index, generating_base_index,
-                    model.nodes[node_index].leaf_indices[1],
-                    model.nodes[node_index].front_node_index,
-                    front, func, back_leaf_index,
-                );
-                poly = back;
-            },
-            ESplitType::Front => {
-                // BDK: Same as above, but using the original poly, not the front split poly.
-                filter_through_subtree(
-                    model, pass, generating_node_index, generating_base_index,
-                    model.nodes[node_index].leaf_indices[1], model.nodes[node_index].front_node_index,
-                    poly, func, back_leaf_index,
-                );
-                return;
-            },
-            ESplitType::Back => {
-                
-            }
-            _ => { return }
-        }
-
-        parent_leaf_index = model.nodes[node_index].leaf_indices[0];
-        outer_node_index = model.nodes[node_index].back_node_index;
-    }
-
-    if pass == 0 {
-        filter_through_subtree(
-            model,
-            1,
-            generating_node_index,
-            generating_base_index,
-            model.nodes[generating_base_index].leaf_indices[1],
-            model.nodes[generating_base_index].front_node_index,
-            poly,
-            func,
-            parent_leaf_index,
-        )
-    } else {
-        func(model, &poly, parent_leaf_index, back_leaf_index, generating_node_index, generating_base_index)
-    }
-}
+type PortalFunc = fn(&mut FEditorVisibility, &FPoly, Option<usize>, Option<usize>, usize, usize);
 
 impl FEditorVisibility<'_> {
+    //
+    // Filter a portal through a front or back subtree.
+    //
+    fn filter_through_subtree(
+        &mut self,
+        pass: usize,
+        generating_node_index: usize,
+        generating_base_index: usize,
+        mut parent_leaf_index: Option<usize>,
+        node_index: Option<usize>,
+        mut poly: FPoly,
+        func: PortalFunc,
+        back_leaf_index: Option<usize>,
+    ) {
+        let mut outer_node_index = node_index;
+        while let Some(node_index) = outer_node_index {
+            // If overflow.
+            if poly.vertices.len() > FPOLY_VERTEX_THRESHOLD {
+                let poly_half = poly.split_in_half().unwrap();
+                self.filter_through_subtree(
+                    pass, generating_node_index, generating_base_index,
+                    parent_leaf_index, Some(node_index), poly_half, func, back_leaf_index,
+                );
+            }
+
+            // Test split.
+            let split_type = poly.split_with_node(self.model, node_index, true);
+
+            match split_type {
+                ESplitType::Split(front, back) => {
+                    self.filter_through_subtree(
+                        pass, generating_node_index, generating_base_index,
+                        self.model.nodes[node_index].leaf_indices[1],
+                        self.model.nodes[node_index].front_node_index,
+                        front, func, back_leaf_index,
+                    );
+                    poly = back;
+                },
+                ESplitType::Front => {
+                    // BDK: Same as above, but using the original poly, not the front split poly.
+                    self.filter_through_subtree(
+                        pass, generating_node_index, generating_base_index,
+                        self.model.nodes[node_index].leaf_indices[1], self.model.nodes[node_index].front_node_index,
+                        poly, func, back_leaf_index,
+                    );
+                    return;
+                },
+                ESplitType::Back => {
+                    
+                }
+                _ => { return }
+            }
+
+            parent_leaf_index = self.model.nodes[node_index].leaf_indices[0];
+            outer_node_index = self.model.nodes[node_index].back_node_index;
+        }
+
+        if pass == 0 {
+            self.filter_through_subtree(
+                1,
+                generating_node_index,
+                generating_base_index,
+                self.model.nodes[generating_base_index].leaf_indices[1],
+                self.model.nodes[generating_base_index].front_node_index,
+                poly,
+                func,
+                parent_leaf_index,
+            )
+        } else {
+            func(self, &poly, parent_leaf_index, back_leaf_index, generating_node_index, generating_base_index)
+        }
+    }
+    
     /// Assign contiguous unique numbers to all front and back leaves in the BSP.
     /// Stores the leaf numbers in FBspNode::iLeaf[2].
     fn assign_leaves(&mut self, node_index: usize, is_outside: bool) {
@@ -232,24 +231,23 @@ impl FEditorVisibility<'_> {
     }
 
     /// Tag a zone portal fragment.
-    fn tag_zone_portal_fragment(model: &mut UModel, poly: &FPoly, front_leaf_index: Option<usize>, back_leaf_index: Option<usize>, generating_node_index: usize, generating_base_index: usize) {
+    fn tag_zone_portal_fragment(visibility: &mut FEditorVisibility, poly: &FPoly, front_leaf_index: Option<usize>, back_leaf_index: Option<usize>, generating_node_index: usize, generating_base_index: usize) {
 	    // Add this node to the bsp as a coplanar to its generator.
         let new_node_index = bsp_add_node(
-            model,
+            visibility.model,
             Some(generating_node_index), 
             crate::bsp::ENodePlace::Plane,
-            model.nodes[generating_node_index].node_flags | EBspNodeFlags::IsNew, poly,
+            visibility.model.nodes[generating_node_index].node_flags | EBspNodeFlags::IsNew, poly,
         );
-
         // Set the node's zones.
-        let backward = poly.normal.dot(model.nodes[generating_base_index].plane.normal()) < 0.0;
-        let new_node = &mut model.nodes[new_node_index];
+        let backward = poly.normal.dot(visibility.model.nodes[generating_base_index].plane.normal()) < 0.0;
+        let new_node = &mut visibility.model.nodes[new_node_index];
         new_node.zone[backward as usize] = match back_leaf_index {
-            Some(back_leaf_index) => model.leaves[back_leaf_index].zone_index,
+            Some(back_leaf_index) => visibility.model.leaves[back_leaf_index].zone_index,
             None => 0,
         } as u8;
         new_node.zone[!backward as usize] = match front_leaf_index {
-            Some(front_leaf_index) => model.leaves[front_leaf_index].zone_index,
+            Some(front_leaf_index) => visibility.model.leaves[front_leaf_index].zone_index,
             None => 0,
         } as u8;
     }
@@ -279,8 +277,7 @@ impl FEditorVisibility<'_> {
 			        // Make sure this node is added to the BSP properly.
                     let original_node_count = self.model.nodes.len();
                     let original_node = &self.model.nodes[original_node_index];
-                    filter_through_subtree(
-                        self.model,
+                    self.filter_through_subtree(
                         0,
                         node_index,
                         original_node_index,
@@ -306,7 +303,7 @@ impl FEditorVisibility<'_> {
         let poly = build_infinite_poly(&self.model, node_index);
 
 	    // Filter the portal through this subtree.
-        self.make_portals_clip(node_index, poly, 0, add_portal);
+        self.make_portals_clip(node_index, poly, 0, Self::add_portal);
 
 	    // Make portals for front.
         if let Some(front_node_index) = self.model.nodes[node_index].front_node_index {
@@ -336,14 +333,14 @@ impl FEditorVisibility<'_> {
                 if let Some(poly) = bsp_node_to_fpoly(self.model, node_index) {
                     self.zone_portal_count += 1;
                     self.zone_portal_surface_index = Some(node.surface_index);
-                    filter_through_subtree(self.model,
+                    self.filter_through_subtree(
                         0,
                         node_index,
                         original_node_index,
                         original_node.leaf_indices[0],
                         original_node.back_node_index,
                         poly,
-                        block_portal,
+                        Self::block_portal,
                         None,
                     );
                 }
@@ -429,6 +426,23 @@ impl FEditorVisibility<'_> {
     // Called by: TestVisibility.
     fn build_connectivity(&mut self) {
     }
+
+    fn add_portal(visibility: &mut FEditorVisibility, poly: &FPoly, front_leaf_index: Option<usize>, back_leaf_index: Option<usize>, generating_node_index: usize, generating_base: usize) {
+        if let Some(front_leaf_index) = front_leaf_index { 
+            if let Some(back_leaf_index) = back_leaf_index {
+		    // Add to linked list of all portals.
+            }
+        }
+    }
+
+    /// Mark a portal as blocked.
+    fn block_portal(visibility: &mut FEditorVisibility, poly: &FPoly, front_leaf_index: Option<usize>, back_leaf_index: Option<usize>, generating_node_index: usize, generating_base: usize) {
+        if let Some(front_leaf_index) = front_leaf_index {
+            if let Some(back_leaf_index) = back_leaf_index {
+                !todo!("this iterates through a linked list of portals.")
+            }
+        }
+    }
 }
 
 
@@ -450,13 +464,6 @@ fn build_infinite_poly(model: &UModel, node_index: usize) -> FPoly {
         base - (axis1 * WORLD_MAX) - (axis2 * WORLD_MAX),
         base + (axis1 * WORLD_MAX) - (axis2 * WORLD_MAX),
     ], &base)
-}
-
-
-fn add_portal(model: &mut UModel, poly: &FPoly, front_leaf_index: Option<usize>, back_leaf_index: Option<usize>, generating_node_index: usize, generating_base: usize) {
-}
-
-fn block_portal(model: &mut UModel, poly: &FPoly, front_leaf_index: Option<usize>, back_leaf_index: Option<usize>, generating_node_index: usize, generating_base: usize) {
 }
 
 
