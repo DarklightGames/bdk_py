@@ -1,5 +1,3 @@
-#![feature(get_many_mut)]
-
 pub mod fpoly;
 pub mod math;
 pub mod bsp;
