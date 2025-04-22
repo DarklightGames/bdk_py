@@ -47,10 +47,6 @@ impl FCoords {
         }
     }
 
-    pub fn mirror_by_plane(&self, plane_base: &FVector, plane_normal: &FVector) -> FCoords {
-        !todo!("Implement mirror_by_plane")
-    }
-
     /// Return this coordinate system's transpose.
     /// If the coordinate system is orthogonal, this is equivalent to its inverse.
     pub fn transpose(&self) -> FCoords {
@@ -60,18 +56,6 @@ impl FCoords {
             y_axis: FVector::new(self.x_axis.y, self.y_axis.y, self.z_axis.y),
             z_axis: FVector::new(self.x_axis.z, self.y_axis.z, self.z_axis.z),
         }
-    }
-
-    pub fn inverse() -> FCoords {
-        !todo!("Implement inverse")
-    }
-
-    pub fn pivot_inverse() -> FCoords {
-        !todo!("Implement pivot_inverse")
-    }
-
-    pub fn apply_pivot(other: &FCoords) -> FCoords {
-        !todo!("Implement apply_pivot")
     }
 
 }

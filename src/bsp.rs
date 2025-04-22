@@ -1,4 +1,4 @@
-use cgmath::{dot, InnerSpace};
+use cgmath::InnerSpace;
 
 use crate::box_::FBox;
 use crate::math::{point_plane_distance, points_are_near, points_are_same, FPlane, FVector, THRESH_VECTORS_ARE_NEAR};
@@ -7,8 +7,6 @@ use crate::model::{EBspNodeFlags, FBspNode, FBspSurf, FVert, UModel, BSP_NODE_MA
 use crate::brush::ABrush;
 use crate::sphere::FSphere;
 use arrayvec::ArrayVec;
-use std::borrow::Borrow;
-use std::collections::LinkedList;
 use std::iter::{self, successors};
 
 
@@ -143,7 +141,7 @@ pub fn merge_coplanars(polys: &mut [FPoly], poly_indices: &[usize]) -> usize {
                 continue
             }
             for j in i + 1..poly_indices.len() {
-                if let Ok([poly1, poly2]) = polys.get_many_mut([poly_indices[i], poly_indices[j]]) {
+                if let Ok([poly1, poly2]) = polys.get_disjoint_mut([poly_indices[i], poly_indices[j]]) {
                     if poly2.vertices.len() == 0 {
                         continue
                     }
@@ -184,14 +182,14 @@ pub fn merge_near_points(model: &mut UModel, dist: f32) -> (usize, usize) {
     // Remap VertPool.
     for i in 0..model.vertices.len() {
         // TODO: peril abound, vertex_index is INT in original code.
-        if model.vertices[i].point_index >= 0 && model.vertices[i].point_index < model.points.len() {
+        if model.vertices[i].point_index < model.points.len() {
             model.vertices[i].point_index = point_remap[model.vertices[i].point_index];
         }
     }
 
     // Remap Surfs.
     for i in 0..model.surfaces.len() {
-        if model.surfaces[i].base_point_index >= 0 && model.surfaces[i].base_point_index < model.points.len() {
+        if model.surfaces[i].base_point_index < model.points.len() {
             model.surfaces[i].base_point_index = point_remap[model.surfaces[i].base_point_index];
         }
     }
@@ -308,7 +306,7 @@ pub fn bsp_add_node(model: &mut UModel, mut parent_node_index: Option<usize>, no
             node.plane_index = None;
         }
 
-        // TODO: get_many_mut will fail here in the Root case since node_index and parent_node_index are the same.
+        // TODO: get_disjoint_mut will fail here in the Root case since node_index and parent_node_index are the same.
         // Tell transaction tracking system that parent is about to be modified.
         {
             match node_place {
@@ -322,7 +320,7 @@ pub fn bsp_add_node(model: &mut UModel, mut parent_node_index: Option<usize>, no
                     node.zone_mask = !0u64;
                 },
                 _ => {
-                    let [node, parent_node] = model.nodes.get_many_mut([node_index, parent_node_index.unwrap()]).unwrap();
+                    let [node, parent_node] = model.nodes.get_disjoint_mut([node_index, parent_node_index.unwrap()]).unwrap();
 
                     node.zone_mask = parent_node.zone_mask;
                     
@@ -699,13 +697,14 @@ pub fn bsp_merge_coplanars(model: &mut UModel, should_remap_links: bool, should_
         poly_list.push(i);
 
         for j in i + 1..model.polys.len() {
-            let [ed_poly, other_poly] = model.polys.get_many_mut([i, j]).unwrap();
+            let [ed_poly, other_poly] = model.polys.get_disjoint_mut([i, j]).unwrap();
             if other_poly.link != ed_poly.link {
                 continue;
             }
 
-            // BDK: Somehow, this doesn't fail when other_poly.vertices is empty in the original code even though
-            // there is no check for that here. I reckon what happens in the original code is that the 
+            // BDK: This doesn't fail when other_poly.vertices is empty in the original code even though
+            // there is no check for that here. I reckon what happens in the original code is that it ends
+            // up just reading junk data. Folks on OldUnreal have reported that this can result in issues.
             if other_poly.vertices.is_empty() {
                 continue;
             }
@@ -766,12 +765,11 @@ pub fn bsp_validate_brush(brush: &mut UModel, force_validate: bool) {
             poly.link = Some(i);
         }
 
-        let mut n = 0;
         for i in 0..brush.polys.len() {
             if brush.polys[i].link == Some(i) {
-                // use get_many_mut
+                // use get_disjoint_mut
                 for j in i + 1..brush.polys.len() {
-                    let [ed_poly, other_poly] = brush.polys.get_many_mut([i, j]).unwrap();
+                    let [ed_poly, other_poly] = brush.polys.get_disjoint_mut([i, j]).unwrap();
 
                     if other_poly.link == Some(j) &&
                         other_poly.material_index == ed_poly.material_index &&
@@ -783,7 +781,6 @@ pub fn bsp_validate_brush(brush: &mut UModel, force_validate: bool) {
                         let distance = point_plane_distance(&other_poly.vertices[0], &ed_poly.vertices[0], &ed_poly.normal);
                         if distance > -0.001 && distance < 0.001 {
                             other_poly.link = Some(i);
-                            n += 1;
                         }
                     }
                 }
@@ -968,7 +965,7 @@ pub fn bsp_brush_csg(
     // Build the brush's coordinate system and find orientation of scale
 	// transform (if negative, edpolyTransform will reverse the clockness
 	// of the EdPoly points and invert the normal).
-    let (coords, uncoords, orientation) = ABrush::build_coords();
+    let (coords, _uncoords, orientation) = ABrush::build_coords();
 
 	// Transform original brush poly into same coordinate system as world
 	// so Bsp filtering operations make sense.
@@ -1120,7 +1117,7 @@ fn cleanup_nodes(model: &mut UModel, node_index: usize, parent_node_index: Optio
 
     if let Some(plane_index) = node_plane_index {
         {
-            let [node, plane_node] = model.nodes.get_many_mut([node_index, plane_index]).unwrap();
+            let [node, plane_node] = model.nodes.get_disjoint_mut([node_index, plane_index]).unwrap();
     
             // Stick our front, back, and parent nodes on the coplanar.
             if node.plane.normal().dot(plane_node.plane.normal()) >= 0.0 {
@@ -1135,7 +1132,7 @@ fn cleanup_nodes(model: &mut UModel, node_index: usize, parent_node_index: Optio
         match parent_node_index {
             None => {
                 // This node is the root.
-                let [node, plane_node] = model.nodes.get_many_mut([node_index, plane_index]).unwrap();
+                let [node, plane_node] = model.nodes.get_disjoint_mut([node_index, plane_index]).unwrap();
                 *node = plane_node.clone();     // Replace root.
                 plane_node.vertex_count = 0;    // Mark as unused.
             }
@@ -1172,7 +1169,7 @@ fn cleanup_nodes(model: &mut UModel, node_index: usize, parent_node_index: Optio
                         model.nodes.clear();
                     }
                     Some(replacement_node_index) => {
-                        let [node, replacement_node] = model.nodes.get_many_mut([node_index, replacement_node_index]).unwrap();
+                        let [node, replacement_node] = model.nodes.get_disjoint_mut([node_index, replacement_node_index]).unwrap();
                         *node = replacement_node.clone();
                     }
                 }
@@ -1330,8 +1327,6 @@ pub fn bsp_build_bounds(model: &mut UModel) {
 /// Opt     = Bsp optimization, BSP_Lame (fast), BSP_Good (medium), BSP_Optimal (slow)
 /// Balance = 0-100, 0=only worry about minimizing splits, 100=only balance tree.
 pub fn bsp_build(model: &mut UModel, optimization: EBspOptimization, balance: u8, portal_bias: u8, rebuild_mode: BspRebuildMode) {
-    let original_polys = model.polys.len();
-
 	// Empty the model's tables.
     match rebuild_mode {
         BspRebuildMode::AllButPolys => {
@@ -1423,7 +1418,7 @@ pub fn split_poly_list(
             continue;
         }
 
-        let [ed_poly, split_poly] = model.polys.get_many_mut([*poly_index, split_poly_index.unwrap()]).unwrap();
+        let [ed_poly, split_poly] = model.polys.get_disjoint_mut([*poly_index, split_poly_index.unwrap()]).unwrap();
         let split_result = ed_poly.split_with_plane(split_poly.vertices[0], split_poly.normal, false);
         
         // To dodge the borrow-checker, for the coplanar and split cases, we need to defer the
@@ -1457,7 +1452,7 @@ pub fn split_poly_list(
                 let mut split_polies_to_add = vec![];
                 {
                     let mut poly_count = model.polys.len();
-                    let [front_poly, back_poly] = model.polys.get_many_mut([*front_poly_indices.last().unwrap(), *back_poly_indices.last().unwrap()]).unwrap();
+                    let [front_poly, back_poly] = model.polys.get_disjoint_mut([*front_poly_indices.last().unwrap(), *back_poly_indices.last().unwrap()]).unwrap();
     
                     // If newly-split polygons have too many vertices, break them up in half.
                     if front_poly.vertices.len() >= FPOLY_VERTEX_THRESHOLD {

@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use bdk_py::brush::ABrush;
 use bdk_py::math::FVector;
 use bdk_py::bsp::{bsp_add_node, bsp_brush_csg, bsp_validate_brush, find_best_split, merge_coplanars, try_to_merge, EBspOptimization, ENodePlace, bsp_merge_coplanars, bsp_build_fpolys};
