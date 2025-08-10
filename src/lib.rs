@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use bsp::{bsp_build, bsp_build_fpolys, bsp_calc_stats, bsp_merge_coplanars, bsp_opt_geom, EBspOptimization, FBspStats};
 use fpoly::{EPolyFlags, FPOLY_VERTEX_THRESHOLD};
 use model::{FBspNode, FBspSurf, FVert, UModel};
-use pyo3::prelude::*;
+use pyo3::{prelude::*, IntoPyObjectExt};
 use crate::fpoly::FPoly;
 
 #[pyclass]
@@ -387,14 +387,18 @@ impl ToString for EBspOptimization {
     }
 }
 
-impl IntoPy<PyObject> for EBspOptimization {
-    fn into_py(self, py: Python) -> PyObject {
-        self.to_string().into_py(py)
+impl<'py> IntoPyObject<'py> for EBspOptimization {
+    type Target = PyAny;
+    type Output = Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        self.to_string().into_bound_py_any(py)
     }
 }
 
 impl FromPyObject<'_> for EBspOptimization {
-    fn extract(ob: &PyAny) -> PyResult<Self> {
+    fn extract_bound(ob: &Bound<'_, PyAny>) -> PyResult<Self> {
         let string = ob.extract::<String>()?;
         EBspOptimization::try_from(string.as_str()).map_err(|_| PyErr::new::<pyo3::exceptions::PyValueError, _>("Invalid optimization value"))
     }
